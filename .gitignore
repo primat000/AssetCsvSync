@@ -1,0 +1,31 @@
+# Unreal plugin: ignore generated/build artifacts
+
+# Build outputs
+/Binaries/
+/Intermediate/
+
+# Optional local caches (if present)
+/DerivedDataCache/
+/Saved/
+
+# IDE/editor noise
+/.vs/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.opensdf
+*.sdf
+
+# Platform build products
+*.dll
+*.pdb
+*.lib
+*.exp
+*.obj
+*.log
+
+# Keep source + descriptor (default, but explicit for clarity)
+!/Source/
+!/Source/**
+!/SheetTableEditorPlugin.uplugin
