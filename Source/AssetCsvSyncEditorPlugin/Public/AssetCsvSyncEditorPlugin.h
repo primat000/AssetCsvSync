@@ -8,7 +8,7 @@
 class SDockTab;
 class FSpawnTabArgs;
 
-class FSheetTableEditorPluginModule : public IModuleInterface
+class FAssetCsvSyncEditorPluginModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override;

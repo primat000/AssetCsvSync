@@ -3,15 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "SheetTableEditorPanelSettings.h"
+#include "AssetCsvSyncEditorPanelSettings.h"
 #include "Widgets/SCompoundWidget.h"
 
 class IDetailsView;
 
-class SSheetTableEditorPanel : public SCompoundWidget
+class SAssetCsvSyncEditorPanel : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SSheetTableEditorPanel) {}
+	SLATE_BEGIN_ARGS(SAssetCsvSyncEditorPanel) {}
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -19,14 +19,13 @@ public:
 private:
 	FReply OnExportClicked();
 	FReply OnImportClicked();
-	FReply OnCreateTestAssetClicked();
 
 	FString PromptForSaveCSVPath(const FString& DefaultFileName) const;
 	FString PromptForOpenCSVPath() const;
 	void Notify(const FText& Message, bool bSuccess) const;
 
-	TStrongObjectPtr<USheetTableCSVExportSettings> ExportSettings;
-	TStrongObjectPtr<USheetTableCSVImportSettings> ImportSettings;
+	TStrongObjectPtr<UAssetCsvSyncCSVExportSettings> ExportSettings;
+	TStrongObjectPtr<UAssetCsvSyncCSVImportSettings> ImportSettings;
 
 	TSharedPtr<IDetailsView> ExportDetails;
 	TSharedPtr<IDetailsView> ImportDetails;

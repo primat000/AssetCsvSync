@@ -6,12 +6,12 @@
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 
-class SHEETTABLEEDITORPLUGIN_API FExportableMetaData
+class ASSETCSVSYNCEDITORPLUGIN_API FExportableMetaData
 {
 public:
 	static FName GetExportableMetaDataKey()
 	{
-		// Class-level opt-in for CSV export/import
+		// Class-level flag for CSV export/import
 		return FName(TEXT("CsvExport"));
 	}
 
@@ -23,13 +23,14 @@ public:
 
 	static FName GetCsvExpandMetaDataKey()
 	{
-		// Property-level "expand nested fields" marker
+		// Property-level "expand nested fields" flag
 		return FName(TEXT("CsvExpand"));
 	}
 
 	static FName GetCsvPrefixMetaDataKey()
 	{
 		// Property-level prefix for expanded nested columns
+		// Optional, by default is <PropertyName>
 		return FName(TEXT("CsvPrefix"));
 	}
 

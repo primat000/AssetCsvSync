@@ -28,4 +28,4 @@
 # Keep source + descriptor (default, but explicit for clarity)
 !/Source/
 !/Source/**
-!/SheetTableEditorPlugin.uplugin
+!/AssetCsvSyncEditorPlugin.uplugin

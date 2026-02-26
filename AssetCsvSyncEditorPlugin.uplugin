@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "Sheet Table Editor Plugin",
+	"FriendlyName": "AssetCsvSync Editor Plugin",
 	"Description": "Plugin for exporting/importing Data Assets to/from CSV using custom Function Specifiers",
 	"Category": "Editor",
 	"CreatedBy": "",
@@ -14,7 +14,7 @@
 	"Plugins": [],
 	"Modules": [
 		{
-			"Name": "SheetTableEditorPlugin",
+			"Name": "AssetCsvSyncEditorPlugin",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
 		}

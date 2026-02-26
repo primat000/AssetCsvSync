@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class SheetTableEditorPlugin : ModuleRules
+public class AssetCsvSyncEditorPlugin : ModuleRules
 {
-	public SheetTableEditorPlugin(ReadOnlyTargetRules Target) : base(Target)
+	public AssetCsvSyncEditorPlugin(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -16,6 +16,7 @@ public class SheetTableEditorPlugin : ModuleRules
 			"UnrealEd",
 			"AssetRegistry",
 			"DeveloperSettings",
+			"Json",
 			"Slate",
 			"SlateCore",
 			"ToolMenus",

@@ -1,9 +1,9 @@
 // MIT Licensed. Copyright (c) 2026 Olga Taranova
 
-#include "SSheetTableEditorPanel.h"
+#include "SAssetCsvSyncEditorPanel.h"
 
-#include "SheetTableCSVHandler.h"
-#include "SheetTableEditorPanelSettings.h"
+#include "AssetCsvSyncCSVHandler.h"
+#include "AssetCsvSyncEditorPanelSettings.h"
 
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
@@ -16,15 +16,16 @@
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/Text/STextBlock.h"
 
-void SSheetTableEditorPanel::Construct(const FArguments& InArgs)
+void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 {
-	ExportSettings = TStrongObjectPtr<USheetTableCSVExportSettings>(NewObject<USheetTableCSVExportSettings>(GetTransientPackage()));
-	ImportSettings = TStrongObjectPtr<USheetTableCSVImportSettings>(NewObject<USheetTableCSVImportSettings>(GetTransientPackage()));
+	ExportSettings = TStrongObjectPtr<UAssetCsvSyncCSVExportSettings>(NewObject<UAssetCsvSyncCSVExportSettings>(GetTransientPackage()));
+	ImportSettings = TStrongObjectPtr<UAssetCsvSyncCSVImportSettings>(NewObject<UAssetCsvSyncCSVImportSettings>(GetTransientPackage()));
 
 	FPropertyEditorModule& PropertyEditorModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	FDetailsViewArgs DetailsArgs;
@@ -48,7 +49,7 @@ void SSheetTableEditorPanel::Construct(const FArguments& InArgs)
 			+ SScrollBox::Slot()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("Sheet Table Editor")))
+				.Text(FText::FromString(TEXT("AssetCsvSync Editor")))
 				.Font(FAppStyle::GetFontStyle("HeadingExtraSmall"))
 			]
 
@@ -75,18 +76,18 @@ void SSheetTableEditorPanel::Construct(const FArguments& InArgs)
 			+ SScrollBox::Slot()
 			.Padding(FMargin(0, 0, 0, 10))
 			[
-				SNew(SButton)
-				.Text(FText::FromString(TEXT("Export to CSV")))
-				.OnClicked(this, &SSheetTableEditorPanel::OnExportClicked)
-			]
-
-			+ SScrollBox::Slot()
-			.Padding(FMargin(0, 0, 0, 16))
-			[
-				SNew(SButton)
-				.Text(FText::FromString(TEXT("Create Test Data Asset")))
-				.ToolTipText(FText::FromString(TEXT("Creates /Game/SheetTableTest/DA_SheetTableTest using the C++ test class.")))
-				.OnClicked(this, &SSheetTableEditorPanel::OnCreateTestAssetClicked)
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(SButton)
+					.Text(FText::FromString(TEXT("Export to CSV")))
+					.IsEnabled_Lambda([this]()
+					{
+						return ExportSettings.IsValid() && ExportSettings->DataAsset != nullptr && !ExportSettings->CSVFile.FilePath.IsEmpty();
+					})
+					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnExportClicked)
+				]
 			]
 
 			// Import section
@@ -106,39 +107,42 @@ void SSheetTableEditorPanel::Construct(const FArguments& InArgs)
 			+ SScrollBox::Slot()
 			.Padding(FMargin(0, 0, 0, 10))
 			[
-				SNew(SButton)
-				.Text(FText::FromString(TEXT("Import CSV to New Data Asset")))
-				.OnClicked(this, &SSheetTableEditorPanel::OnImportClicked)
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(SButton)
+					.Text(FText::FromString(TEXT("Import CSV")))
+					.IsEnabled_Lambda([this]()
+					{
+						return ImportSettings.IsValid() && ImportSettings->DataAsset != nullptr && !ImportSettings->CSVFile.FilePath.IsEmpty();
+					})
+					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnImportClicked)
+				]
 			]
 		]
 	];
 }
 // TODO
-FReply SSheetTableEditorPanel::OnExportClicked()
+FReply SAssetCsvSyncEditorPanel::OnExportClicked()
 {
 	if (!ExportSettings.IsValid() || !ExportSettings->DataAsset)
 	{
 		Notify(FText::FromString(TEXT("Select a Data Asset to export.")), false);
 		return FReply::Handled();
 	}
-
-	FString TargetPath = ExportSettings->CSVFile.FilePath;
-	if (TargetPath.IsEmpty())
+	if (ExportSettings->CSVFile.FilePath.IsEmpty())
 	{
-		TargetPath = PromptForSaveCSVPath(ExportSettings->DataAsset->GetName() + TEXT(".csv"));
-	}
-
-	if (TargetPath.IsEmpty())
-	{
+		Notify(FText::FromString(TEXT("Select a CSV file path.")), false);
 		return FReply::Handled();
 	}
 
-	const bool bOk = USheetTableCSVHandler::ExportDataAssetToCSV(ExportSettings->DataAsset, TargetPath);
+	const bool bOk = UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath);
 	Notify(bOk ? FText::FromString(TEXT("Export complete.")) : FText::FromString(TEXT("Export failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
 // TODO
-FReply SSheetTableEditorPanel::OnImportClicked()
+FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 {
 	if (!ImportSettings.IsValid())
 	{
@@ -146,61 +150,34 @@ FReply SSheetTableEditorPanel::OnImportClicked()
 		return FReply::Handled();
 	}
 
-	FString SourcePath = ImportSettings->CSVFile.FilePath;
+	const FString SourcePath = ImportSettings->CSVFile.FilePath;
 	if (SourcePath.IsEmpty())
 	{
-		SourcePath = PromptForOpenCSVPath();
-	}
-
-	if (SourcePath.IsEmpty())
-	{
+		Notify(FText::FromString(TEXT("Select a CSV file path.")), false);
 		return FReply::Handled();
 	}
 
-	if (!ImportSettings->DataAssetClass)
+	if (!ImportSettings->DataAsset)
 	{
-		Notify(FText::FromString(TEXT("Select a Data Asset class to import into.")), false);
+		Notify(FText::FromString(TEXT("Select a Data Asset to update.")), false);
 		return FReply::Handled();
 	}
 
-	FString Folder = ImportSettings->TargetFolder;
-	if (Folder.IsEmpty())
-	{
-		Folder = TEXT("/Game");
-	}
-	if (!Folder.StartsWith(TEXT("/Game")))
-	{
-		Notify(FText::FromString(TEXT("TargetFolder must start with /Game")), false);
-		return FReply::Handled();
-	}
+	const FString AssetPath = ImportSettings->DataAsset->GetPathName();
+	UClass* DataAssetClass = ImportSettings->DataAsset->GetClass();
 
-	const FString AssetName = ImportSettings->AssetName.IsEmpty() ? TEXT("DA_ImportedFromCSV") : ImportSettings->AssetName;
-	const FString AssetPath = Folder / AssetName;
-
-	UDataAsset* Created = nullptr;
-	const bool bOk = USheetTableCSVHandler::ImportCSVToNewDataAssetAsset(SourcePath, AssetPath, ImportSettings->DataAssetClass.Get(), Created, ImportSettings->bSavePackage);
+	UDataAsset* CreatedOrUpdated = nullptr;
+	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToNewDataAssetAsset(SourcePath, AssetPath, DataAssetClass, CreatedOrUpdated, ImportSettings->bSavePackage);
+	if (bOk && CreatedOrUpdated)
+	{
+		ImportSettings->DataAsset = CreatedOrUpdated;
+	}
 	Notify(bOk ? FText::FromString(TEXT("Import complete.")) : FText::FromString(TEXT("Import failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
 
 // TODO
-FReply SSheetTableEditorPanel::OnCreateTestAssetClicked()
-{
-	UClass* TestClass = LoadClass<UDataAsset>(nullptr, TEXT("/Script/SheetTableExport.SheetTableTestDataAsset"));
-	if (!TestClass)
-	{
-		Notify(FText::FromString(TEXT("Test class not found. Build the project and ensure SheetTableTestDataAsset exists.")), false);
-		return FReply::Handled();
-	}
-
-	UDataAsset* Created = nullptr;
-	const bool bOk = USheetTableCSVHandler::CreateNewDataAssetAsset(TEXT("/Game/SheetTableTest/DA_SheetTableTest"), TestClass, Created, true);
-	Notify(bOk ? FText::FromString(TEXT("Test Data Asset created.")) : FText::FromString(TEXT("Could not create test asset (maybe it already exists).")), bOk);
-	return FReply::Handled();
-}
-
-// TODO
-FString SSheetTableEditorPanel::PromptForSaveCSVPath(const FString& DefaultFileName) const
+FString SAssetCsvSyncEditorPanel::PromptForSaveCSVPath(const FString& DefaultFileName) const
 {
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
@@ -221,7 +198,7 @@ FString SSheetTableEditorPanel::PromptForSaveCSVPath(const FString& DefaultFileN
 }
 
 // TODO
-FString SSheetTableEditorPanel::PromptForOpenCSVPath() const
+FString SAssetCsvSyncEditorPanel::PromptForOpenCSVPath() const
 {
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
@@ -241,8 +218,9 @@ FString SSheetTableEditorPanel::PromptForOpenCSVPath() const
 	return (bOk && OutFiles.Num() > 0) ? OutFiles[0] : FString();
 }
 
+
 // TODO
-void SSheetTableEditorPanel::Notify(const FText& Message, bool bSuccess) const
+void SAssetCsvSyncEditorPanel::Notify(const FText& Message, bool bSuccess) const
 {
 	FNotificationInfo Info(Message);
 	Info.ExpireDuration = 3.0f;
