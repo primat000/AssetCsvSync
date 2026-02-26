@@ -14,5 +14,9 @@ AssetCsvSync provides:
 - DataAsset → CSV export   
 - Fully reflection-based mapping
 
+## Editor
+<img width="1008" height="607" alt="image" src="https://github.com/user-attachments/assets/53081c21-34fc-4a9f-b6fe-15eb8c796401" />
+
+
 > ⚠️ This project is currently under active development.
 > APIs and behavior may change without notice.
