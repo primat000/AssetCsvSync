@@ -36,10 +36,10 @@ AssetCsvSync uses three metadata tags to control how `UDataAsset` classes are ex
 | Case | Tag | Export | Import | Round-Trip |
 |------|-----|--------|--------|------------|
 | Any leaf property (primitives, strings, enums, structs, references, containers) | CsvColumn | Single column: `ExportTextItem` (UE Property Text Format) | `ImportText_Direct` | ✔ |
-| Struct expand (`FStructProperty`) | CsvExpand | Columns `Prop.Inner` (only inner fields with `CsvColumn`) | `ImportText_Direct` applied to each inner field | ✔ |
-| SoftObjectPtr expand (`TSoftObjectPtr<UObject>`) | CsvExpand | Columns `Prop.Inner` from target (target class must have `CsvExport`) | Imported into target object using matching columns (if target is valid) | ✔* |
-| TArray expand | CsvExpand | Columns by index (`Prop.0`, `Prop.1`, ...) | Imported by index (array resized if needed) | ✔ |
-| TMap expand | CsvExpand | Columns by key (`Prop.KeyToken`) | Imported by key (key reconstructed from column name) | ✔ |
+| Struct expand (`FStructProperty`) | CsvExpand | Columns `PropertyName_Inner` (only inner fields with `CsvColumn`) | `ImportText_Direct` applied to each inner field | ✔ |
+| SoftObjectPtr expand (`TSoftObjectPtr<UObject>`) | CsvExpand | Columns `PropertyName_Inner` from target (target class must have `CsvExport`) | Imported into target object using matching columns (if target is valid) | ✔* |
+| TArray expand | CsvExpand | Columns by index (`PropertyName_0`, `PropertyName_1`, ...) | Imported by index (array resized if needed) | ✔ |
+| TMap expand | CsvExpand | Columns by key (`PropertyName_KeyToken`) | Imported by key (key reconstructed from column name) | ✔ |
 | TSet expand | CsvExpand | Converted to array and exported as indexed columns | Not supported (import forbidden) | ✖ |
 
 ## Editor
