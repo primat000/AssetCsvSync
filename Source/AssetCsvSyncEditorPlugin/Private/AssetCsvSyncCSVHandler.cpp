@@ -427,11 +427,7 @@ void UAssetCsvSyncCSVHandler::ExportClassColumnsEmpty(UClass* Class, TMap<FStrin
 			if (!InnerClass || !CanExportClass(InnerClass))
 				continue;
 
-			FString ExpandPrefix = FExportableMetaData::GetCsvPrefix(Property);
-			if (ExpandPrefix.IsEmpty())
-			{
-				ExpandPrefix = Property->GetName() + TEXT("_");
-			}
+			const FString ExpandPrefix = Property->GetName() + TEXT("_");
 
 			ExportClassColumnsEmpty(InnerClass, InOutColumnToValue, InOutColumnOrder, Prefix + ExpandPrefix);
 		}
@@ -489,11 +485,7 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 				continue;
 			}
 
-			FString ExpandPrefix = FExportableMetaData::GetCsvPrefix(Property);
-			if (ExpandPrefix.IsEmpty())
-			{
-				ExpandPrefix = Property->GetName() + TEXT("_");
-			}
+			const FString ExpandPrefix = Property->GetName() + TEXT("_");
 
 			if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
 			{
@@ -501,12 +493,38 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 					continue;
 				const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(ObjectOrNull);
 				FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
-				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+				if (FStructProperty* StructInner = CastField<FStructProperty>(ArrayProp->Inner))
 				{
-					const void* ElemPtr = Helper.GetRawPtr(Index);
-					const FString ColumnName = Prefix + ExpandPrefix + FString::FromInt(Index);
-					const FString Value = PropertyToString(ArrayProp->Inner, reinterpret_cast<const uint8*>(ElemPtr));
-					AddColumn(ColumnName, Value);
+					for (int32 Index = 0; Index < Helper.Num(); ++Index)
+					{
+						const void* ElemPtr = Helper.GetRawPtr(Index);
+						const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
+						ExportStructToColumns(ElemPtr, StructInner->Struct, InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+					}
+				}
+				else if (GetObjectPropertyClass(ArrayProp->Inner) != nullptr)
+				{
+					for (int32 Index = 0; Index < Helper.Num(); ++Index)
+					{
+						const void* ElemPtr = Helper.GetRawPtr(Index);
+						UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
+						if (!ElemObj)
+							continue;
+						if (!CanExportClass(ElemObj->GetClass()))
+							continue;
+						const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
+						ExportObjectToColumns(ElemObj, ElemObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+					}
+				}
+				else
+				{
+					for (int32 Index = 0; Index < Helper.Num(); ++Index)
+					{
+						const void* ElemPtr = Helper.GetRawPtr(Index);
+						const FString ColumnName = Prefix + ExpandPrefix + FString::FromInt(Index);
+						const FString Value = PropertyToString(ArrayProp->Inner, reinterpret_cast<const uint8*>(ElemPtr));
+						AddColumn(ColumnName, Value);
+					}
 				}
 				continue;
 			}
@@ -517,14 +535,44 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 					continue;
 				const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(ObjectOrNull);
 				FScriptMapHelper Helper(MapProp, MapPtr);
-				for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+				if (FStructProperty* StructValue = CastField<FStructProperty>(MapProp->ValueProp))
 				{
-					const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
-					const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
-					const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
-					const FString ColumnName = Prefix + ExpandPrefix + KeyString;
-					const FString Value = PropertyToString(MapProp->ValueProp, ValuePtr);
-					AddColumn(ColumnName, Value);
+					for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+					{
+						const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+						const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+						const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+						const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
+						ExportStructToColumns(ValuePtr, StructValue->Struct, InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+					}
+				}
+				else if (GetObjectPropertyClass(MapProp->ValueProp) != nullptr)
+				{
+					for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+					{
+						const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+						const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+						const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+						UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
+						if (!ValObj)
+							continue;
+						if (!CanExportClass(ValObj->GetClass()))
+							continue;
+						const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
+						ExportObjectToColumns(ValObj, ValObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+					}
+				}
+				else
+				{
+					for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+					{
+						const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+						const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+						const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+						const FString ColumnName = Prefix + ExpandPrefix + KeyString;
+						const FString Value = PropertyToString(MapProp->ValueProp, ValuePtr);
+						AddColumn(ColumnName, Value);
+					}
 				}
 				continue;
 			}
@@ -581,6 +629,482 @@ UObject* UAssetCsvSyncCSVHandler::ResolveObjectPropertyValue(UObject* Container,
 		return ObjProp->GetPropertyValue(ValuePtr);
 	}
 	return nullptr;
+}
+
+UObject* UAssetCsvSyncCSVHandler::ResolveObjectPropertyValueFromContainerPtr(const void* ContainerPtr, FProperty* Property, bool bLoadSoft)
+{
+	if (!ContainerPtr || !Property)
+		return nullptr;
+
+	if (FSoftObjectProperty* SoftProp = CastField<FSoftObjectProperty>(Property))
+	{
+		const void* ValuePtr = SoftProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+		const FSoftObjectPtr SoftPtr = SoftProp->GetPropertyValue(ValuePtr);
+		return bLoadSoft ? SoftPtr.LoadSynchronous() : SoftPtr.Get();
+	}
+	if (FObjectProperty* ObjProp = CastField<FObjectProperty>(Property))
+	{
+		const void* ValuePtr = ObjProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+		return ObjProp->GetPropertyValue(ValuePtr);
+	}
+	return nullptr;
+}
+
+void UAssetCsvSyncCSVHandler::ExportStructToColumns(const void* StructPtr, UScriptStruct* Struct, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix, TSet<const UObject*>& Visited)
+{
+	if (!Struct || !StructPtr)
+		return;
+
+	auto AddColumn = [&InOutColumnToValue, &InOutColumnOrder](const FString& Name, const FString& Value)
+	{
+		if (!InOutColumnToValue.Contains(Name))
+		{
+			InOutColumnOrder.Add(Name);
+		}
+		InOutColumnToValue.Add(Name, Value);
+	};
+
+	for (TFieldIterator<FProperty> It(Struct, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		FProperty* Property = *It;
+		if (!Property)
+			continue;
+
+		// Struct expansion exports all leaf fields by default.
+		// If CsvColumn is present, it overrides the column name.
+		// If CsvExpand is present without CsvColumn, we do not export a leaf column for the property.
+		if (FExportableMetaData::HasCsvColumn(Property) || !FExportableMetaData::HasCsvExpand(Property))
+		{
+			const FString ColumnKey = FExportableMetaData::HasCsvColumn(Property) ? FExportableMetaData::GetCsvColumn(Property) : Property->GetName();
+			const FString ColumnName = Prefix + (!ColumnKey.IsEmpty() ? ColumnKey : Property->GetName());
+			const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(StructPtr);
+			AddColumn(ColumnName, PropertyToString(Property, reinterpret_cast<const uint8*>(ValuePtr)));
+		}
+
+		if (!FExportableMetaData::HasCsvExpand(Property))
+			continue;
+
+		if (CastField<FSetProperty>(Property))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("CsvExpand is not supported on TSet: %s"), *Property->GetName());
+			continue;
+		}
+
+		const FString ExpandPrefix = Property->GetName() + TEXT("_");
+
+		if (FStructProperty* NestedStruct = CastField<FStructProperty>(Property))
+		{
+			const void* NestedPtr = NestedStruct->ContainerPtrToValuePtr<void>(StructPtr);
+			ExportStructToColumns(NestedPtr, NestedStruct->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + ExpandPrefix, Visited);
+			continue;
+		}
+
+		if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
+		{
+			const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
+			FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
+
+			if (FStructProperty* StructInner = CastField<FStructProperty>(ArrayProp->Inner))
+			{
+				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+				{
+					const void* ElemPtr = Helper.GetRawPtr(Index);
+					const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ExportStructToColumns(ElemPtr, StructInner->Struct, InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+				}
+			}
+			else if (GetObjectPropertyClass(ArrayProp->Inner) != nullptr)
+			{
+				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+				{
+					const void* ElemPtr = Helper.GetRawPtr(Index);
+					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
+					if (!ElemObj)
+						continue;
+					if (!CanExportClass(ElemObj->GetClass()))
+						continue;
+					const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ExportObjectToColumns(ElemObj, ElemObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+				}
+			}
+			else
+			{
+				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+				{
+					const void* ElemPtr = Helper.GetRawPtr(Index);
+					const FString ColumnName = Prefix + ExpandPrefix + FString::FromInt(Index);
+					const FString Value = PropertyToString(ArrayProp->Inner, reinterpret_cast<const uint8*>(ElemPtr));
+					AddColumn(ColumnName, Value);
+				}
+			}
+			continue;
+		}
+
+		if (FMapProperty* MapProp = CastField<FMapProperty>(Property))
+		{
+			const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(StructPtr);
+			FScriptMapHelper Helper(MapProp, MapPtr);
+
+			if (FStructProperty* StructValue = CastField<FStructProperty>(MapProp->ValueProp))
+			{
+				for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+				{
+					const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+					const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+					const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+					const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
+					ExportStructToColumns(ValuePtr, StructValue->Struct, InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+				}
+			}
+			else if (GetObjectPropertyClass(MapProp->ValueProp) != nullptr)
+			{
+				for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+				{
+					const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+					const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+					const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
+					if (!ValObj)
+						continue;
+					if (!CanExportClass(ValObj->GetClass()))
+						continue;
+					const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
+					ExportObjectToColumns(ValObj, ValObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
+				}
+			}
+			else
+			{
+				for (FScriptMapHelper::FIterator MapIt = Helper.CreateIterator(); MapIt; ++MapIt)
+				{
+					const uint8* KeyPtr = Helper.GetKeyPtr(MapIt);
+					const uint8* ValuePtr = Helper.GetValuePtr(MapIt);
+					const FString KeyString = PropertyToString(MapProp->KeyProp, KeyPtr);
+					const FString ColumnName = Prefix + ExpandPrefix + KeyString;
+					const FString Value = PropertyToString(MapProp->ValueProp, ValuePtr);
+					AddColumn(ColumnName, Value);
+				}
+			}
+			continue;
+		}
+
+		UObject* InnerObject = ResolveObjectPropertyValueFromContainerPtr(StructPtr, Property, true);
+		if (!InnerObject)
+			continue;
+		if (!CanExportClass(InnerObject->GetClass()))
+			continue;
+		ExportObjectToColumns(InnerObject, InnerObject->GetClass(), InOutColumnToValue, InOutColumnOrder, Prefix + ExpandPrefix, Visited);
+	}
+
+	if (UScriptStruct* SuperStruct = Cast<UScriptStruct>(Struct->GetSuperStruct()))
+	{
+		ExportStructToColumns(StructPtr, SuperStruct, InOutColumnToValue, InOutColumnOrder, Prefix, Visited);
+	}
+}
+
+bool UAssetCsvSyncCSVHandler::ApplyColumnsToStruct(void* StructPtr, UScriptStruct* Struct, const TMap<FString, FString>& ColumnToValue, const FString& Prefix, TSet<const UObject*>& Visited)
+{
+	if (!Struct || !StructPtr)
+		return false;
+
+	const EAssetCsvSyncWriteBackScope Scope = UAssetCsvSyncEditorPluginSettings::Get()->WriteBackScope;
+
+	for (TFieldIterator<FProperty> It(Struct, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		FProperty* Property = *It;
+		if (!Property)
+			continue;
+
+		// Struct expansion imports all leaf fields by default.
+		if (FExportableMetaData::HasCsvColumn(Property) || !FExportableMetaData::HasCsvExpand(Property))
+		{
+			const FString ColumnKey = FExportableMetaData::HasCsvColumn(Property) ? FExportableMetaData::GetCsvColumn(Property) : Property->GetName();
+			const FString ColumnName = Prefix + (!ColumnKey.IsEmpty() ? ColumnKey : Property->GetName());
+			if (const FString* Found = ColumnToValue.Find(ColumnName))
+			{
+				void* ValuePtr = Property->ContainerPtrToValuePtr<void>(StructPtr);
+				StringToProperty(Property, reinterpret_cast<uint8*>(ValuePtr), *Found);
+			}
+		}
+
+		if (Scope != EAssetCsvSyncWriteBackScope::RootAndExpanded || !FExportableMetaData::HasCsvExpand(Property))
+			continue;
+
+		if (CastField<FSetProperty>(Property))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("CsvExpand is not supported on TSet: %s"), *Property->GetName());
+			continue;
+		}
+
+		const FString ExpandPrefix = Property->GetName() + TEXT("_");
+		const FString FullExpandPrefix = Prefix + ExpandPrefix;
+
+		if (FStructProperty* NestedStruct = CastField<FStructProperty>(Property))
+		{
+			void* NestedPtr = NestedStruct->ContainerPtrToValuePtr<void>(StructPtr);
+			ApplyColumnsToStruct(NestedPtr, NestedStruct->Struct, ColumnToValue, FullExpandPrefix, Visited);
+			continue;
+		}
+
+		if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
+		{
+			void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
+			FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
+
+			if (FStructProperty* StructInner = CastField<FStructProperty>(ArrayProp->Inner))
+			{
+				TSet<int32> Indices;
+				int32 MaxIndex = -1;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					const FString IndexStr = Suffix.Left(UnderscorePos);
+					if (!IndexStr.IsNumeric())
+						continue;
+					const int32 Index = FCString::Atoi(*IndexStr);
+					if (Index < 0)
+						continue;
+					Indices.Add(Index);
+					MaxIndex = FMath::Max(MaxIndex, Index);
+				}
+				if (MaxIndex >= 0 && MaxIndex >= Helper.Num())
+				{
+					Helper.Resize(MaxIndex + 1);
+				}
+				for (int32 Index : Indices)
+				{
+					if (Index < 0 || Index >= Helper.Num())
+						continue;
+					void* ElemPtr = Helper.GetRawPtr(Index);
+					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ApplyColumnsToStruct(ElemPtr, StructInner->Struct, ColumnToValue, ElemPrefix, Visited);
+				}
+				continue;
+			}
+
+			if (GetObjectPropertyClass(ArrayProp->Inner) != nullptr)
+			{
+				TSet<int32> Indices;
+				int32 MaxIndex = -1;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					const FString IndexStr = Suffix.Left(UnderscorePos);
+					if (!IndexStr.IsNumeric())
+						continue;
+					const int32 Index = FCString::Atoi(*IndexStr);
+					if (Index < 0)
+						continue;
+					Indices.Add(Index);
+					MaxIndex = FMath::Max(MaxIndex, Index);
+				}
+				if (MaxIndex >= 0 && MaxIndex >= Helper.Num())
+				{
+					Helper.Resize(MaxIndex + 1);
+				}
+				for (int32 Index : Indices)
+				{
+					if (Index < 0 || Index >= Helper.Num())
+						continue;
+					void* ElemPtr = Helper.GetRawPtr(Index);
+					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
+					if (!ElemObj)
+						continue;
+					if (!CanExportClass(ElemObj->GetClass()))
+						continue;
+					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ApplyColumnsToObject(ElemObj, ElemObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
+				}
+				continue;
+			}
+
+			// Primitive elements: ${Prefix}${Index}
+			TArray<TPair<int32, const FString*>> Writes;
+			for (const TPair<FString, FString>& Pair : ColumnToValue)
+			{
+				if (!Pair.Key.StartsWith(FullExpandPrefix))
+					continue;
+				const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+				if (Suffix.IsEmpty() || !Suffix.IsNumeric())
+					continue;
+				const int32 Index = FCString::Atoi(*Suffix);
+				if (Index < 0)
+					continue;
+				Writes.Add(TPair<int32, const FString*>(Index, &Pair.Value));
+			}
+			Writes.Sort([](const auto& A, const auto& B) { return A.Key < B.Key; });
+			for (const auto& W : Writes)
+			{
+				if (W.Key >= Helper.Num())
+				{
+					Helper.Resize(W.Key + 1);
+				}
+				void* ElemPtr = Helper.GetRawPtr(W.Key);
+				StringToProperty(ArrayProp->Inner, reinterpret_cast<uint8*>(ElemPtr), *W.Value);
+			}
+			continue;
+		}
+
+		if (FMapProperty* MapProp = CastField<FMapProperty>(Property))
+		{
+			void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(StructPtr);
+			FScriptMapHelper Helper(MapProp, MapPtr);
+			bool bNeedsRehash = false;
+
+			if (FStructProperty* StructValue = CastField<FStructProperty>(MapProp->ValueProp))
+			{
+				TSet<FString> Keys;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					Keys.Add(Suffix.Left(UnderscorePos));
+				}
+
+				TArray<uint8> TempKeyStorage;
+				TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());
+				MapProp->KeyProp->InitializeValue(TempKeyStorage.GetData());
+
+				for (const FString& KeyString : Keys)
+				{
+					MapProp->KeyProp->ClearValue(TempKeyStorage.GetData());
+					if (!StringToProperty(MapProp->KeyProp, TempKeyStorage.GetData(), KeyString))
+						continue;
+					int32 FoundIndex = Helper.FindMapIndexWithKey(TempKeyStorage.GetData());
+					if (FoundIndex == INDEX_NONE)
+					{
+						const int32 NewIndex = Helper.AddDefaultValue_Invalid_NeedsRehash();
+						MapProp->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(NewIndex), TempKeyStorage.GetData());
+						bNeedsRehash = true;
+						FoundIndex = NewIndex;
+					}
+					void* ValuePtr = Helper.GetValuePtr(FoundIndex);
+					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
+					ApplyColumnsToStruct(ValuePtr, StructValue->Struct, ColumnToValue, ElemPrefix, Visited);
+				}
+				MapProp->KeyProp->DestroyValue(TempKeyStorage.GetData());
+				if (bNeedsRehash)
+				{
+					Helper.Rehash();
+				}
+				continue;
+			}
+
+			if (GetObjectPropertyClass(MapProp->ValueProp) != nullptr)
+			{
+				TSet<FString> Keys;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					Keys.Add(Suffix.Left(UnderscorePos));
+				}
+
+				TArray<uint8> TempKeyStorage;
+				TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());
+				MapProp->KeyProp->InitializeValue(TempKeyStorage.GetData());
+
+				for (const FString& KeyString : Keys)
+				{
+					MapProp->KeyProp->ClearValue(TempKeyStorage.GetData());
+					if (!StringToProperty(MapProp->KeyProp, TempKeyStorage.GetData(), KeyString))
+						continue;
+					int32 FoundIndex = Helper.FindMapIndexWithKey(TempKeyStorage.GetData());
+					if (FoundIndex == INDEX_NONE)
+					{
+						const int32 NewIndex = Helper.AddDefaultValue_Invalid_NeedsRehash();
+						MapProp->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(NewIndex), TempKeyStorage.GetData());
+						bNeedsRehash = true;
+						FoundIndex = NewIndex;
+					}
+					void* ValuePtr = Helper.GetValuePtr(FoundIndex);
+					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
+					if (!ValObj)
+						continue;
+					if (!CanExportClass(ValObj->GetClass()))
+						continue;
+					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
+					ApplyColumnsToObject(ValObj, ValObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
+				}
+
+				MapProp->KeyProp->DestroyValue(TempKeyStorage.GetData());
+				if (bNeedsRehash)
+				{
+					Helper.Rehash();
+				}
+				continue;
+			}
+
+			// Primitive values: ${Prefix}${Key}
+			TArray<uint8> TempKeyStorage;
+			TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());
+			MapProp->KeyProp->InitializeValue(TempKeyStorage.GetData());
+
+			for (const TPair<FString, FString>& Pair : ColumnToValue)
+			{
+				if (!Pair.Key.StartsWith(FullExpandPrefix))
+					continue;
+				const FString KeyString = Pair.Key.Mid(FullExpandPrefix.Len());
+				if (KeyString.IsEmpty())
+					continue;
+
+				MapProp->KeyProp->ClearValue(TempKeyStorage.GetData());
+				if (!StringToProperty(MapProp->KeyProp, TempKeyStorage.GetData(), KeyString))
+					continue;
+
+				int32 FoundIndex = Helper.FindMapIndexWithKey(TempKeyStorage.GetData());
+				if (FoundIndex == INDEX_NONE)
+				{
+					const int32 NewIndex = Helper.AddDefaultValue_Invalid_NeedsRehash();
+					MapProp->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(NewIndex), TempKeyStorage.GetData());
+					StringToProperty(MapProp->ValueProp, Helper.GetValuePtr(NewIndex), Pair.Value);
+					bNeedsRehash = true;
+				}
+				else
+				{
+					StringToProperty(MapProp->ValueProp, Helper.GetValuePtr(FoundIndex), Pair.Value);
+				}
+			}
+
+			if (bNeedsRehash)
+			{
+				Helper.Rehash();
+			}
+			MapProp->KeyProp->DestroyValue(TempKeyStorage.GetData());
+			continue;
+		}
+
+		UObject* InnerObject = ResolveObjectPropertyValueFromContainerPtr(StructPtr, Property, true);
+		if (!InnerObject)
+			continue;
+		if (!CanExportClass(InnerObject->GetClass()))
+			continue;
+		ApplyColumnsToObject(InnerObject, InnerObject->GetClass(), ColumnToValue, FullExpandPrefix, Visited);
+	}
+
+	if (UScriptStruct* SuperStruct = Cast<UScriptStruct>(Struct->GetSuperStruct()))
+	{
+		ApplyColumnsToStruct(StructPtr, SuperStruct, ColumnToValue, Prefix, Visited);
+	}
+
+	return true;
 }
 
 bool UAssetCsvSyncCSVHandler::ApplyCSVRowToObject(UObject* TargetObject, UClass* TargetClass, const TArray<FString>& Headers, const TArray<FString>& Values)
@@ -641,17 +1165,94 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 			continue;
 		}
 
-		FString ExpandPrefix = FExportableMetaData::GetCsvPrefix(Property);
-		if (ExpandPrefix.IsEmpty())
-		{
-			ExpandPrefix = Property->GetName() + TEXT("_");
-		}
+		const FString ExpandPrefix = Property->GetName() + TEXT("_");
 		const FString FullExpandPrefix = Prefix + ExpandPrefix;
 
 		if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
 		{
 			void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(TargetObject);
 			FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
+
+			if (FStructProperty* StructInner = CastField<FStructProperty>(ArrayProp->Inner))
+			{
+				TSet<int32> Indices;
+				int32 MaxIndex = -1;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					const FString IndexStr = Suffix.Left(UnderscorePos);
+					if (!IndexStr.IsNumeric())
+						continue;
+					const int32 Index = FCString::Atoi(*IndexStr);
+					if (Index < 0)
+						continue;
+					Indices.Add(Index);
+					MaxIndex = FMath::Max(MaxIndex, Index);
+				}
+
+				if (MaxIndex >= 0 && MaxIndex >= Helper.Num())
+				{
+					Helper.Resize(MaxIndex + 1);
+				}
+
+				for (int32 Index : Indices)
+				{
+					if (Index < 0 || Index >= Helper.Num())
+						continue;
+					void* ElemPtr = Helper.GetRawPtr(Index);
+					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ApplyColumnsToStruct(ElemPtr, StructInner->Struct, ColumnToValue, ElemPrefix, Visited);
+				}
+				continue;
+			}
+
+			if (GetObjectPropertyClass(ArrayProp->Inner) != nullptr)
+			{
+				TSet<int32> Indices;
+				int32 MaxIndex = -1;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					const FString IndexStr = Suffix.Left(UnderscorePos);
+					if (!IndexStr.IsNumeric())
+						continue;
+					const int32 Index = FCString::Atoi(*IndexStr);
+					if (Index < 0)
+						continue;
+					Indices.Add(Index);
+					MaxIndex = FMath::Max(MaxIndex, Index);
+				}
+
+				if (MaxIndex >= 0 && MaxIndex >= Helper.Num())
+				{
+					Helper.Resize(MaxIndex + 1);
+				}
+
+				for (int32 Index : Indices)
+				{
+					if (Index < 0 || Index >= Helper.Num())
+						continue;
+					void* ElemPtr = Helper.GetRawPtr(Index);
+					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
+					if (!ElemObj)
+						continue;
+					if (!CanExportClass(ElemObj->GetClass()))
+						continue;
+					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
+					ApplyColumnsToObject(ElemObj, ElemObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
+				}
+				continue;
+			}
 
 			TArray<TPair<int32, const FString*>> Writes;
 			for (const TPair<FString, FString>& Pair : ColumnToValue)
@@ -684,6 +1285,103 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 			void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(TargetObject);
 			FScriptMapHelper Helper(MapProp, MapPtr);
 			bool bNeedsRehash = false;
+
+			if (FStructProperty* StructValue = CastField<FStructProperty>(MapProp->ValueProp))
+			{
+				TSet<FString> Keys;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					Keys.Add(Suffix.Left(UnderscorePos));
+				}
+
+				TArray<uint8> TempKeyStorage;
+				TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());
+				MapProp->KeyProp->InitializeValue(TempKeyStorage.GetData());
+
+				for (const FString& KeyString : Keys)
+				{
+					MapProp->KeyProp->ClearValue(TempKeyStorage.GetData());
+					if (!StringToProperty(MapProp->KeyProp, TempKeyStorage.GetData(), KeyString))
+						continue;
+
+					int32 FoundIndex = Helper.FindMapIndexWithKey(TempKeyStorage.GetData());
+					if (FoundIndex == INDEX_NONE)
+					{
+						const int32 NewIndex = Helper.AddDefaultValue_Invalid_NeedsRehash();
+						MapProp->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(NewIndex), TempKeyStorage.GetData());
+						bNeedsRehash = true;
+						FoundIndex = NewIndex;
+					}
+
+					void* ValuePtr = Helper.GetValuePtr(FoundIndex);
+					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
+					ApplyColumnsToStruct(ValuePtr, StructValue->Struct, ColumnToValue, ElemPrefix, Visited);
+				}
+
+				MapProp->KeyProp->DestroyValue(TempKeyStorage.GetData());
+				if (bNeedsRehash)
+				{
+					Helper.Rehash();
+				}
+				continue;
+			}
+
+			if (GetObjectPropertyClass(MapProp->ValueProp) != nullptr)
+			{
+				TSet<FString> Keys;
+				for (const TPair<FString, FString>& Pair : ColumnToValue)
+				{
+					if (!Pair.Key.StartsWith(FullExpandPrefix))
+						continue;
+					const FString Suffix = Pair.Key.Mid(FullExpandPrefix.Len());
+					int32 UnderscorePos = INDEX_NONE;
+					if (!Suffix.FindChar(TEXT('_'), UnderscorePos) || UnderscorePos <= 0)
+						continue;
+					Keys.Add(Suffix.Left(UnderscorePos));
+				}
+
+				TArray<uint8> TempKeyStorage;
+				TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());
+				MapProp->KeyProp->InitializeValue(TempKeyStorage.GetData());
+
+				for (const FString& KeyString : Keys)
+				{
+					MapProp->KeyProp->ClearValue(TempKeyStorage.GetData());
+					if (!StringToProperty(MapProp->KeyProp, TempKeyStorage.GetData(), KeyString))
+						continue;
+
+					int32 FoundIndex = Helper.FindMapIndexWithKey(TempKeyStorage.GetData());
+					if (FoundIndex == INDEX_NONE)
+					{
+						const int32 NewIndex = Helper.AddDefaultValue_Invalid_NeedsRehash();
+						MapProp->KeyProp->CopyCompleteValue(Helper.GetKeyPtr(NewIndex), TempKeyStorage.GetData());
+						bNeedsRehash = true;
+						FoundIndex = NewIndex;
+					}
+
+					void* ValuePtr = Helper.GetValuePtr(FoundIndex);
+					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
+					if (!ValObj)
+						continue;
+					if (!CanExportClass(ValObj->GetClass()))
+						continue;
+					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
+					ApplyColumnsToObject(ValObj, ValObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
+				}
+
+				MapProp->KeyProp->DestroyValue(TempKeyStorage.GetData());
+				if (bNeedsRehash)
+				{
+					Helper.Rehash();
+				}
+				continue;
+			}
 
 			TArray<uint8> TempKeyStorage;
 			TempKeyStorage.SetNumZeroed(MapProp->KeyProp->GetSize());

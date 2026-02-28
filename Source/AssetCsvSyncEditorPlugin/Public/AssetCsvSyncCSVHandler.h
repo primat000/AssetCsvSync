@@ -42,8 +42,11 @@ private:
 	static bool ApplyColumnsToObject(UObject* TargetObject, UClass* TargetClass, const TMap<FString, FString>& ColumnToValue, const FString& Prefix, TSet<const UObject*>& Visited);
 	static void ExportObjectToColumns(UObject* ObjectOrNull, UClass* Class, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix, TSet<const UObject*>& Visited);
 	static void ExportClassColumnsEmpty(UClass* Class, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix);
+	static void ExportStructToColumns(const void* StructPtr, UScriptStruct* Struct, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix, TSet<const UObject*>& Visited);
 	static UObject* ResolveObjectPropertyValue(UObject* Container, FProperty* Property, bool bLoadSoft);
+	static UObject* ResolveObjectPropertyValueFromContainerPtr(const void* ContainerPtr, FProperty* Property, bool bLoadSoft);
 	static UClass* GetObjectPropertyClass(FProperty* Property);
+	static bool ApplyColumnsToStruct(void* StructPtr, UScriptStruct* Struct, const TMap<FString, FString>& ColumnToValue, const FString& Prefix, TSet<const UObject*>& Visited);
 
 	static FString PropertyToString(FProperty* Property, const uint8* PropertyData);
 	static bool StringToProperty(FProperty* Property, uint8* PropertyData, const FString& StringValue);

@@ -27,13 +27,6 @@ public:
 		return FName(TEXT("CsvExpand"));
 	}
 
-	static FName GetCsvPrefixMetaDataKey()
-	{
-		// Property-level prefix for expanded nested columns
-		// Optional, by default is <PropertyName>
-		return FName(TEXT("CsvPrefix"));
-	}
-
 	static bool IsExportable(UClass* Class)
 	{
 		if (!Class)
@@ -73,13 +66,5 @@ public:
 	static bool HasCsvExpand(FProperty* Property)
 	{
 		return Property && Property->HasMetaData(GetCsvExpandMetaDataKey());
-	}
-
-	static FString GetCsvPrefix(FProperty* Property)
-	{
-		if (!Property)
-			return FString();
-
-		return Property->GetMetaData(GetCsvPrefixMetaDataKey());
 	}
 };
