@@ -167,7 +167,7 @@ FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 	UClass* DataAssetClass = ImportSettings->DataAsset->GetClass();
 
 	UDataAsset* CreatedOrUpdated = nullptr;
-	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToNewDataAssetAsset(SourcePath, AssetPath, DataAssetClass, CreatedOrUpdated, ImportSettings->bSavePackage);
+	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToNewDataAsset(SourcePath, AssetPath, DataAssetClass, CreatedOrUpdated, ImportSettings->bSavePackage);
 	if (bOk && CreatedOrUpdated)
 	{
 		ImportSettings->DataAsset = CreatedOrUpdated;

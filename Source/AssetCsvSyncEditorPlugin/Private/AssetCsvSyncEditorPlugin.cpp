@@ -5,6 +5,7 @@
 #include "SAssetCsvSyncEditorPanel.h"
 #include "AssetCsvSyncCSVExportSettingsCustomization.h"
 #include "AssetCsvSyncCSVImportSettingsCustomization.h"
+#include "AssetCsvSyncLog.h"
 
 #include "Framework/Commands/UIAction.h"
 #include "Framework/Docking/TabManager.h"
@@ -16,7 +17,7 @@
 
 void FAssetCsvSyncEditorPluginModule::StartupModule()
 {
-	UE_LOG(LogTemp, Log, TEXT("AssetCsvSyncEditorPlugin: Startup"));
+	UE_LOG(LogAssetCsvSync, Log, TEXT("AssetCsvSyncEditorPlugin: Startup"));
 
 	static const FName TabName(TEXT("AssetCsvSync"));
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
@@ -39,7 +40,7 @@ void FAssetCsvSyncEditorPluginModule::StartupModule()
 
 void FAssetCsvSyncEditorPluginModule::ShutdownModule()
 {
-	UE_LOG(LogTemp, Log, TEXT("AssetCsvSyncEditorPlugin: Shutdown"));
+	UE_LOG(LogAssetCsvSync, Log, TEXT("AssetCsvSyncEditorPlugin: Shutdown"));
 
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("PropertyEditor")))
 	{

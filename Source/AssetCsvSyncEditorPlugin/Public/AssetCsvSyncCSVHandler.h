@@ -24,7 +24,7 @@ public:
 
 	// Creates a new DataAsset at AssetPath and imports the CSV into it
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
-	static bool ImportCSVToNewDataAssetAsset(const FString& FilePath, const FString& AssetPath, UClass* DataAssetClass, UDataAsset*& OutDataAsset, bool bSavePackage);
+	static bool ImportCSVToNewDataAsset(const FString& FilePath, const FString& AssetPath, UClass* DataAssetClass, UDataAsset*& OutDataAsset, bool bSavePackage);
 
 	// Creates a new DataAsset asset at AssetPath
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
@@ -43,6 +43,7 @@ private:
 	static void ExportObjectToColumns(UObject* ObjectOrNull, UClass* Class, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix, TSet<const UObject*>& Visited);
 	static void ExportClassColumnsEmpty(UClass* Class, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix);
 	static void ExportStructToColumns(const void* StructPtr, UScriptStruct* Struct, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix, TSet<const UObject*>& Visited);
+	static void ExportStructColumnsEmpty(UScriptStruct* Struct, TMap<FString, FString>& InOutColumnToValue, TArray<FString>& InOutColumnOrder, const FString& Prefix);
 	static UObject* ResolveObjectPropertyValue(UObject* Container, FProperty* Property, bool bLoadSoft);
 	static UObject* ResolveObjectPropertyValueFromContainerPtr(const void* ContainerPtr, FProperty* Property, bool bLoadSoft);
 	static UClass* GetObjectPropertyClass(FProperty* Property);
