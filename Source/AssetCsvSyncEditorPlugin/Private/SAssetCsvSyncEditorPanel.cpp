@@ -5,12 +5,8 @@
 #include "AssetCsvSyncCSVHandler.h"
 #include "AssetCsvSyncEditorPanelSettings.h"
 
-#include "DesktopPlatformModule.h"
-#include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Modules/ModuleManager.h"
-#include "Misc/Paths.h"
-#include "Misc/PackageName.h"
 #include "PropertyEditorModule.h"
 #include "Styling/AppStyle.h"
 #include "UObject/UObjectGlobals.h"
@@ -49,7 +45,7 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 			+ SScrollBox::Slot()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("AssetCsvSync Editor")))
+				.Text(FText::FromString(TEXT("Asset CSV Sync")))
 				.Font(FAppStyle::GetFontStyle("HeadingExtraSmall"))
 			]
 
@@ -84,7 +80,7 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 					.Text(FText::FromString(TEXT("Export to CSV")))
 					.IsEnabled_Lambda([this]()
 					{
-						return ExportSettings.IsValid() && ExportSettings->DataAsset != nullptr && !ExportSettings->CSVFile.FilePath.IsEmpty();
+						return ExportSettings.IsValid() && ExportSettings->DataAsset != nullptr && !ExportSettings->CSVFile.FilePath.IsEmpty() && ExportSettings->ExportColumns.Num() > 0;
 					})
 					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnExportClicked)
 				]
@@ -115,7 +111,7 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 					.Text(FText::FromString(TEXT("Import CSV")))
 					.IsEnabled_Lambda([this]()
 					{
-						return ImportSettings.IsValid() && ImportSettings->DataAsset != nullptr && !ImportSettings->CSVFile.FilePath.IsEmpty();
+						return ImportSettings.IsValid() && ImportSettings->DataAsset != nullptr && !ImportSettings->CSVFile.FilePath.IsEmpty() && ImportSettings->ImportColumns.Num() > 0;
 					})
 					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnImportClicked)
 				]
@@ -123,7 +119,6 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 		]
 	];
 }
-// TODO
 FReply SAssetCsvSyncEditorPanel::OnExportClicked()
 {
 	if (!ExportSettings.IsValid() || !ExportSettings->DataAsset)
@@ -137,11 +132,10 @@ FReply SAssetCsvSyncEditorPanel::OnExportClicked()
 		return FReply::Handled();
 	}
 
-	const bool bOk = UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath);
+	const bool bOk = UAssetCsvSyncCSVHandler::ExportDataAssetToCSV_Columns(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath, ExportSettings->ExportColumns);
 	Notify(bOk ? FText::FromString(TEXT("Export complete.")) : FText::FromString(TEXT("Export failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
-// TODO
 FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 {
 	if (!ImportSettings.IsValid())
@@ -163,63 +157,10 @@ FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 		return FReply::Handled();
 	}
 
-	const FString AssetPath = ImportSettings->DataAsset->GetPathName();
-	UClass* DataAssetClass = ImportSettings->DataAsset->GetClass();
-
-	UDataAsset* CreatedOrUpdated = nullptr;
-	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToNewDataAsset(SourcePath, AssetPath, DataAssetClass, CreatedOrUpdated, ImportSettings->bSavePackage);
-	if (bOk && CreatedOrUpdated)
-	{
-		ImportSettings->DataAsset = CreatedOrUpdated;
-	}
+	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToDataAssetInPlace(SourcePath, ImportSettings->DataAsset, ImportSettings->ImportColumns, ImportSettings->bSavePackage);
 	Notify(bOk ? FText::FromString(TEXT("Import complete.")) : FText::FromString(TEXT("Import failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
-
-// TODO
-FString SAssetCsvSyncEditorPanel::PromptForSaveCSVPath(const FString& DefaultFileName) const
-{
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (!DesktopPlatform)
-		return FString();
-
-	TArray<FString> OutFiles;
-	const void* ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-	const bool bOk = DesktopPlatform->SaveFileDialog(
-		ParentWindowHandle,
-		TEXT("Export CSV"),
-		FPaths::ProjectDir(),
-		DefaultFileName,
-		TEXT("CSV files (*.csv)|*.csv"),
-		EFileDialogFlags::None,
-		OutFiles);
-
-	return (bOk && OutFiles.Num() > 0) ? OutFiles[0] : FString();
-}
-
-// TODO
-FString SAssetCsvSyncEditorPanel::PromptForOpenCSVPath() const
-{
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (!DesktopPlatform)
-		return FString();
-
-	TArray<FString> OutFiles;
-	const void* ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-	const bool bOk = DesktopPlatform->OpenFileDialog(
-		ParentWindowHandle,
-		TEXT("Import CSV"),
-		FPaths::ProjectDir(),
-		TEXT(""),
-		TEXT("CSV files (*.csv)|*.csv"),
-		EFileDialogFlags::None,
-		OutFiles);
-
-	return (bOk && OutFiles.Num() > 0) ? OutFiles[0] : FString();
-}
-
-
-// TODO
 void SAssetCsvSyncEditorPanel::Notify(const FText& Message, bool bSuccess) const
 {
 	FNotificationInfo Info(Message);

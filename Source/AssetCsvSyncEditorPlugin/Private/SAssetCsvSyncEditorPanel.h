@@ -19,9 +19,6 @@ public:
 private:
 	FReply OnExportClicked();
 	FReply OnImportClicked();
-
-	FString PromptForSaveCSVPath(const FString& DefaultFileName) const;
-	FString PromptForOpenCSVPath() const;
 	void Notify(const FText& Message, bool bSuccess) const;
 
 	TStrongObjectPtr<UAssetCsvSyncCSVExportSettings> ExportSettings;

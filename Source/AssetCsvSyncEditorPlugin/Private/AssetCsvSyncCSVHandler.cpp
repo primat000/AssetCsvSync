@@ -18,12 +18,14 @@
 #include "AssetCsvSyncEditorPluginSettings.h"
 
 #include "UObject/PropertyPortFlags.h"
+#include "ScopedTransaction.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-// TODO: new format uses "_" as sepsrator instead of old "."
+// Struct expansion uses "_" as the column name separator (e.g. "Stats_Health").
+// Import supports both "_" and the legacy "." style for backward compatibility.
 
 static FString AssetCsvSync_ExportTextAlways(FProperty* Property, const void* ValuePtr, int32 PortFlags);
 
@@ -102,6 +104,11 @@ static FString AssetCsvSync_ExportTextAlways(FProperty* Property, const void* Va
 
 bool UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(UDataAsset* DataAsset, const FString& FilePath)
 {
+	return ExportDataAssetToCSV_Columns(DataAsset, FilePath, TArray<FString>());
+}
+
+bool UAssetCsvSyncCSVHandler::ExportDataAssetToCSV_Columns(UDataAsset* DataAsset, const FString& FilePath, const TArray<FString>& ColumnsToExport)
+{
 	if (!DataAsset)
 	{
 		UE_LOG(LogAssetCsvSync, Error, TEXT("ExportDataAssetToCSV: DataAsset is null"));
@@ -120,6 +127,16 @@ bool UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(UDataAsset* DataAsset, const 
 	TSet<const UObject*> Visited;
 	ExportObjectToColumns(DataAsset, Class, ColumnToValue, ColumnOrder, FString(), Visited);
 
+	TSet<FString> Allowed;
+	if (ColumnsToExport.Num() > 0)
+	{
+		Allowed.Reserve(ColumnsToExport.Num());
+		for (const FString& Col : ColumnsToExport)
+		{
+			Allowed.Add(Col);
+		}
+	}
+
 	if (ColumnOrder.IsEmpty())
 	{
 		UE_LOG(LogAssetCsvSync, Warning, TEXT("ExportDataAssetToCSV: No exportable properties found for class %s"), *Class->GetName());
@@ -127,14 +144,23 @@ bool UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(UDataAsset* DataAsset, const 
 	}
 
 	FString CSVContent;
+	TArray<FString> FilteredOrder;
+	FilteredOrder.Reserve(ColumnOrder.Num());
 	for (const FString& ColName : ColumnOrder)
+	{
+		if (Allowed.Num() == 0 || Allowed.Contains(ColName))
+		{
+			FilteredOrder.Add(ColName);
+		}
+	}
+	for (const FString& ColName : FilteredOrder)
 	{
 		CSVContent += EscapeCSVString(ColName) + TEXT(",");
 	}
 	CSVContent.RemoveFromEnd(TEXT(","));
 	CSVContent += TEXT("\n");
 
-	for (const FString& ColName : ColumnOrder)
+	for (const FString& ColName : FilteredOrder)
 	{
 		const FString* Value = ColumnToValue.Find(ColName);
 		CSVContent += EscapeCSVString(Value ? *Value : FString()) + TEXT(",");
@@ -143,6 +169,101 @@ bool UAssetCsvSyncCSVHandler::ExportDataAssetToCSV(UDataAsset* DataAsset, const 
 	CSVContent += TEXT("\n");
 
 	return FFileHelper::SaveStringToFile(CSVContent, *FilePath);
+}
+
+bool UAssetCsvSyncCSVHandler::GetCSVHeaderColumns(const FString& FilePath, TArray<FString>& OutColumns)
+{
+	OutColumns.Reset();
+	FString CSVContent;
+	if (!FFileHelper::LoadFileToString(CSVContent, *FilePath))
+	{
+		return false;
+	}
+	TArray<FString> Lines;
+	CSVContent.ParseIntoArrayLines(Lines, false);
+	if (Lines.Num() < 1)
+	{
+		return false;
+	}
+	OutColumns = ParseCSVLine(Lines[0]);
+	return OutColumns.Num() > 0;
+}
+
+bool UAssetCsvSyncCSVHandler::ImportCSVToDataAssetInPlace(const FString& FilePath, UDataAsset* DataAsset, const TArray<FString>& ColumnsToImport, bool bSavePackage)
+{
+	if (!DataAsset)
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVToDataAssetInPlace: DataAsset is null"));
+		return false;
+	}
+	if (!CanExportClass(DataAsset->GetClass()))
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVToDataAssetInPlace: Class %s is not marked with meta=(CsvExport)"), *DataAsset->GetClass()->GetName());
+		return false;
+	}
+
+	FString CSVContent;
+	if (!FFileHelper::LoadFileToString(CSVContent, *FilePath))
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVToDataAssetInPlace: Could not load file %s"), *FilePath);
+		return false;
+	}
+	TArray<FString> Lines;
+	CSVContent.ParseIntoArrayLines(Lines, false);
+	if (Lines.Num() < 2)
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVToDataAssetInPlace: CSV file has insufficient data"));
+		return false;
+	}
+	TArray<FString> Headers = ParseCSVLine(Lines[0]);
+	TArray<FString> Values = ParseCSVLine(Lines[1]);
+	if (Headers.Num() != Values.Num())
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVToDataAssetInPlace: Column count mismatch"));
+		return false;
+	}
+
+	TSet<FString> Allowed;
+	if (ColumnsToImport.Num() > 0)
+	{
+		Allowed.Reserve(ColumnsToImport.Num());
+		for (const FString& Col : ColumnsToImport)
+		{
+			Allowed.Add(Col);
+		}
+	}
+
+	TMap<FString, FString> ColumnToValue;
+	ColumnToValue.Reserve(Headers.Num());
+	for (int32 i = 0; i < Headers.Num(); ++i)
+	{
+		if (Allowed.Num() == 0 || Allowed.Contains(Headers[i]))
+		{
+			ColumnToValue.Add(Headers[i], Values[i]);
+		}
+	}
+
+	{
+		// Wrap in a transaction so the import can be undone with Ctrl+Z.
+		FScopedTransaction Transaction(FText::FromString(TEXT("Import CSV to Data Asset")));
+		DataAsset->Modify();
+
+		TSet<const UObject*> Visited;
+		if (!ApplyColumnsToObject(DataAsset, DataAsset->GetClass(), ColumnToValue, FString(), Visited))
+		{
+			// Transaction rolls back automatically when it goes out of scope without committing.
+			return false;
+		}
+
+		DataAsset->MarkPackageDirty();
+		DataAsset->PostEditChange();
+	}
+
+	if (bSavePackage)
+	{
+		SaveCreatedAsset(DataAsset->GetPackage(), DataAsset);
+	}
+	return true;
 }
 
 bool UAssetCsvSyncCSVHandler::ImportCSVToDataAsset(const FString& FilePath, UDataAsset*& OutDataAsset, UClass* DataAssetClass)
@@ -258,13 +379,19 @@ bool UAssetCsvSyncCSVHandler::ImportCSVToNewDataAsset(const FString& FilePath, c
 		}
 
 		UE_LOG(LogAssetCsvSync, Log, TEXT("ImportCSVToNewDataAsset: Updating existing asset %s"), *ObjectPath);
-		if (!ApplyCSVRowToObject(ExistingAsset, ExistingAsset->GetClass(), ColumnHeaders, Values))
 		{
-			return false;
+			FScopedTransaction Transaction(FText::FromString(TEXT("Import CSV to Data Asset")));
+			ExistingAsset->Modify();
+
+			if (!ApplyCSVRowToObject(ExistingAsset, ExistingAsset->GetClass(), ColumnHeaders, Values))
+			{
+				return false;
+			}
+
+			ExistingAsset->MarkPackageDirty();
+			ExistingAsset->PostEditChange();
 		}
 
-		ExistingAsset->MarkPackageDirty();
-		ExistingAsset->PostEditChange();
 		if (bSavePackage)
 		{
 			SaveCreatedAsset(ExistingAsset->GetPackage(), ExistingAsset);
@@ -302,13 +429,18 @@ bool UAssetCsvSyncCSVHandler::ImportCSVToNewDataAsset(const FString& FilePath, c
 		return false;
 	}
 
-	if (!ApplyCSVRowToObject(NewAsset, DataAssetClass, ColumnHeaders, Values))
 	{
-		return false;
-	}
+		FScopedTransaction Transaction(FText::FromString(TEXT("Import CSV to New Data Asset")));
+		NewAsset->Modify();
 
-	NewAsset->MarkPackageDirty();
-	NewAsset->PostEditChange();
+		if (!ApplyCSVRowToObject(NewAsset, DataAssetClass, ColumnHeaders, Values))
+		{
+			return false;
+		}
+
+		NewAsset->MarkPackageDirty();
+		NewAsset->PostEditChange();
+	}
 
 	if (bSavePackage)
 	{
@@ -498,7 +630,7 @@ void UAssetCsvSyncCSVHandler::ExportClassColumnsEmpty(UClass* Class, TMap<FStrin
 		{
 			if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
 			{
-				ExportStructColumnsEmpty(StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."));
+				ExportStructColumnsEmpty(StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"));
 				continue;
 			}
 
@@ -575,11 +707,11 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 				if (ObjectOrNull)
 				{
 					const void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(ObjectOrNull);
-					ExportStructToColumns(StructPtr, StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."), Visited);
+					ExportStructToColumns(StructPtr, StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"), Visited);
 				}
 				else
 				{
-					ExportStructColumnsEmpty(StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."));
+					ExportStructColumnsEmpty(StructProp->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"));
 				}
 				continue;
 			}
@@ -794,7 +926,7 @@ void UAssetCsvSyncCSVHandler::ExportStructToColumns(const void* StructPtr, UScri
 		if (FStructProperty* NestedStruct = CastField<FStructProperty>(Property))
 		{
 			const void* NestedPtr = NestedStruct->ContainerPtrToValuePtr<void>(StructPtr);
-			ExportStructToColumns(NestedPtr, NestedStruct->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."), Visited);
+			ExportStructToColumns(NestedPtr, NestedStruct->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"), Visited);
 			continue;
 		}
 
@@ -1266,13 +1398,10 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 
 		const FString ExpandPrefix = Property->GetName() + TEXT("_");
 		const FString FullExpandPrefix = Prefix + ExpandPrefix;
-		const FString FullExpandPrefixDot = Prefix + Property->GetName() + TEXT(".");
 
 		if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
 		{
 			void* StructValuePtr = StructProp->ContainerPtrToValuePtr<void>(TargetObject);
-			// Support both "Prop.Inner" and legacy "Prop_Inner" column styles.
-			ApplyColumnsToStruct(StructValuePtr, StructProp->Struct, ColumnToValue, FullExpandPrefixDot, Visited);
 			ApplyColumnsToStruct(StructValuePtr, StructProp->Struct, ColumnToValue, FullExpandPrefix, Visited);
 			continue;
 		}
@@ -1395,19 +1524,10 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 			FScriptMapHelper Helper(MapProp, MapPtr);
 			bool bNeedsRehash = false;
 
-			auto GetMatchedPrefixLen = [&FullExpandPrefix, &FullExpandPrefixDot](const FString& ColName) -> int32
-			{
-				if (ColName.StartsWith(FullExpandPrefixDot))
-					return FullExpandPrefixDot.Len();
-				if (ColName.StartsWith(FullExpandPrefix))
-					return FullExpandPrefix.Len();
-				return 0;
-			};
-
 			bool bHasAnyColumnsForThisMap = false;
 			for (const TPair<FString, FString>& Pair : ColumnToValue)
 			{
-				if (GetMatchedPrefixLen(Pair.Key) > 0)
+				if (Pair.Key.StartsWith(FullExpandPrefix))
 				{
 					bHasAnyColumnsForThisMap = true;
 					break;
@@ -1523,10 +1643,9 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 
 			for (const TPair<FString, FString>& Pair : ColumnToValue)
 			{
-				const int32 PrefixLen = GetMatchedPrefixLen(Pair.Key);
-				if (PrefixLen <= 0)
+				if (!Pair.Key.StartsWith(FullExpandPrefix))
 					continue;
-				const FString KeyString = Pair.Key.Mid(PrefixLen);
+				const FString KeyString = Pair.Key.Mid(FullExpandPrefix.Len());
 				if (KeyString.IsEmpty())
 					continue;
 
@@ -1669,11 +1788,12 @@ FString UAssetCsvSyncCSVHandler::PropertyToString(FProperty* Property, const uin
 	}
 	else if (FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
 	{
-		return FString::Printf(TEXT("%f"), FloatProperty->GetPropertyValue(PropertyData));
+		// SanitizeFloat produces the minimal decimal representation for exact round-trip.
+		return FString::SanitizeFloat(FloatProperty->GetPropertyValue(PropertyData));
 	}
 	else if (FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
 	{
-		return FString::Printf(TEXT("%f"), DoubleProperty->GetPropertyValue(PropertyData));
+		return FString::SanitizeFloat(DoubleProperty->GetPropertyValue(PropertyData));
 	}
 	else if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 	{
@@ -1707,6 +1827,12 @@ FString UAssetCsvSyncCSVHandler::PropertyToString(FProperty* Property, const uin
 	}
 	else if (FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
 	{
+		// Export by enum name when the byte is backed by a UEnum, so import can match by name.
+		if (ByteProperty->Enum)
+		{
+			const int64 RawValue = static_cast<int64>(ByteProperty->GetPropertyValue(PropertyData));
+			return ByteProperty->Enum->GetNameStringByValue(RawValue);
+		}
 		return FString::Printf(TEXT("%d"), ByteProperty->GetPropertyValue(PropertyData));
 	}
 
@@ -1754,14 +1880,14 @@ void UAssetCsvSyncCSVHandler::ExportStructColumnsEmpty(UScriptStruct* Struct, TM
 
 		if (FStructProperty* NestedStruct = CastField<FStructProperty>(Property))
 		{
-			ExportStructColumnsEmpty(NestedStruct->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."));
+			ExportStructColumnsEmpty(NestedStruct->Struct, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"));
 			continue;
 		}
 
 		UClass* InnerClass = GetObjectPropertyClass(Property);
 		if (InnerClass && CanExportClass(InnerClass))
 		{
-			ExportClassColumnsEmpty(InnerClass, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("."));
+			ExportClassColumnsEmpty(InnerClass, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"));
 		}
 	}
 
@@ -1932,6 +2058,22 @@ bool UAssetCsvSyncCSVHandler::StringToProperty(FProperty* Property, uint8* Prope
 		ObjectProperty->SetPropertyValue(PropertyData, Loaded);
 		return true;
 	}
+	else if (FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+	{
+		if (ByteProperty->Enum)
+		{
+			// Try to match by enum name first (paired with the name-based export above).
+			const int64 EnumValue = ByteProperty->Enum->GetValueByNameString(StringValue);
+			if (EnumValue != INDEX_NONE)
+			{
+				ByteProperty->SetPropertyValue(PropertyData, static_cast<uint8>(EnumValue));
+				return true;
+			}
+			// Fallback: numeric string produced by older exports.
+		}
+		ByteProperty->SetPropertyValue(PropertyData, static_cast<uint8>(FCString::Atoi(*StringValue)));
+		return true;
+	}
 
 	// Fallback to UE text import for complex types
 	const TCHAR* Buffer = *StringValue;
@@ -2002,7 +2144,9 @@ TArray<FString> UAssetCsvSyncCSVHandler::ParseCSVLine(const FString& Line)
 
 FString UAssetCsvSyncCSVHandler::EscapeListItem(const FString& Value)
 {
-	if (Value.Contains(TEXT(";")) || Value.Contains(TEXT("\"")))
+	// Empty strings are always quoted so that [""] round-trips as `""` rather
+	// than as an empty cell (which would be parsed as an empty array).
+	if (Value.IsEmpty() || Value.Contains(TEXT(";")) || Value.Contains(TEXT("\"")))
 	{
 		FString Escaped = Value.Replace(TEXT("\""), TEXT("\"\""));
 		return TEXT("\"") + Escaped + TEXT("\"");
@@ -2067,12 +2211,17 @@ TArray<FString> UAssetCsvSyncCSVHandler::ParseListCell(const FString& Cell)
 
 FString UAssetCsvSyncCSVHandler::JoinListCell(const TArray<FString>& Items)
 {
+	// Use separator-between (not trailing) so that ["a",""] round-trips as "a;"
+	// and [""] round-trips as "" (the quoted empty string), distinguishable from
+	// an absent/empty cell which ParseListCell treats as [].
 	FString Out;
-	for (const FString& Item : Items)
+	for (int32 i = 0; i < Items.Num(); ++i)
 	{
-		Out += EscapeListItem(Item);
-		Out += TEXT(";");
+		Out += EscapeListItem(Items[i]);
+		if (i < Items.Num() - 1)
+		{
+			Out += TEXT(";");
+		}
 	}
-	Out.RemoveFromEnd(TEXT(";"));
 	return Out;
 }

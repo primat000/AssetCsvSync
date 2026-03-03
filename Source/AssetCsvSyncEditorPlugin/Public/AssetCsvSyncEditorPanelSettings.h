@@ -19,6 +19,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Export")
 	FFilePath CSVFile;
+
+	// Populated automatically from the selected asset; remove items to exclude columns.
+	UPROPERTY(EditAnywhere, Category = "Export")
+	TArray<FString> ExportColumns;
 };
 
 UCLASS()
@@ -32,6 +36,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Import")
 	FFilePath CSVFile;
+
+	// Populated automatically from the CSV header; remove items to exclude columns.
+	UPROPERTY(EditAnywhere, Category = "Import")
+	TArray<FString> ImportColumns;
 
 	UPROPERTY(EditAnywhere, Category = "Import")
 	bool bSavePackage = true;

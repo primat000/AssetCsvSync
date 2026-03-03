@@ -19,8 +19,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static bool ExportDataAssetToCSV(UDataAsset* DataAsset, const FString& FilePath);
 
+	// Exports only the specified columns (exact column names as in CSV header).
+	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
+	static bool ExportDataAssetToCSV_Columns(UDataAsset* DataAsset, const FString& FilePath, const TArray<FString>& ColumnsToExport);
+
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static bool ImportCSVToDataAsset(const FString& FilePath, UDataAsset*& OutDataAsset, UClass* DataAssetClass);
+
+	// Imports selected columns into an existing asset.
+	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
+	static bool ImportCSVToDataAssetInPlace(const FString& FilePath, UDataAsset* DataAsset, const TArray<FString>& ColumnsToImport, bool bSavePackage);
 
 	// Creates a new DataAsset at AssetPath and imports the CSV into it
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
@@ -35,6 +43,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static TArray<FString> GetExportableProperties(UClass* Class);
+	static bool GetCSVHeaderColumns(const FString& FilePath, TArray<FString>& OutColumns);
 
 private:
 	static bool CanExportClass(UClass* Class);

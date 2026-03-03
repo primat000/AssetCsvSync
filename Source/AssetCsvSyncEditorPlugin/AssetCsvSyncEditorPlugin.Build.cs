@@ -8,25 +8,24 @@ public class AssetCsvSyncEditorPlugin : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { 
-			"Core", 
-			"CoreUObject", 
-			"Engine", 
-			"EditorFramework", 
+		PublicDependencyModuleNames.AddRange(new string[] {
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"EditorFramework",
+			"DeveloperSettings",
+		});
+
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"PropertyEditor",
 			"UnrealEd",
 			"AssetRegistry",
-			"DeveloperSettings",
 			"Json",
 			"Slate",
 			"SlateCore",
 			"ToolMenus",
 			"LevelEditor",
 			"DesktopPlatform",
-			"AssetTools"
-		});
-
-		PrivateDependencyModuleNames.AddRange(new string[] { 
-			"PropertyEditor"
 		});
 	}
 }
