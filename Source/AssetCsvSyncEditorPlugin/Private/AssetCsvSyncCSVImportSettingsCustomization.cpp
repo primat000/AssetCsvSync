@@ -23,6 +23,8 @@
 #include "Widgets/Layout/SScrollBox.h"
 
 #include "AssetCsvSyncCSVHandler.h"
+#include "ExportableMetaData.h"
+#include "PropertyCustomizationHelpers.h"
 #include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/Images/SImage.h"
 
@@ -264,6 +266,30 @@ void FAssetCsvSyncCSVImportSettingsCustomization::CustomizeDetails(IDetailLayout
 		]
 	];
 
-	ImportCategory.AddProperty(DataAssetHandle);
+	// Hide the default DataAsset row and replace it with a filtered picker
+	// that only shows assets whose class has meta=(CsvExport).
+	DetailBuilder.HideProperty(DataAssetHandle);
+	ImportCategory.AddCustomRow(FText::FromString(TEXT("Data Asset")))
+		.NameContent()
+		[
+			SNew(STextBlock)
+				.Text(FText::FromString(TEXT("Data Asset")))
+				.Font(IDetailLayoutBuilder::GetDetailFont())
+		]
+		.ValueContent()
+		.MinDesiredWidth(420.0f)
+		[
+			SNew(SObjectPropertyEntryBox)
+				.PropertyHandle(DataAssetHandle)
+				.AllowedClass(UDataAsset::StaticClass())
+				.OnShouldFilterAsset_Lambda([](const FAssetData& AssetData) -> bool
+				{
+					// Return true to hide assets that don't have CsvExport.
+					UClass* AssetClass = AssetData.GetClass();
+					if (!AssetClass)
+						return true;
+					return !FExportableMetaData::IsExportable(AssetClass);
+				})
+		];
 	ImportCategory.AddProperty(SaveHandle);
 }

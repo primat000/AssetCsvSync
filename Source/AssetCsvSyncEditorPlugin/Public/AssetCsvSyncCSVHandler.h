@@ -38,12 +38,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static bool CreateNewDataAssetAsset(const FString& AssetPath, UClass* DataAssetClass, UDataAsset*& OutDataAsset, bool bSavePackage);
 
+	// CsvRows: one DataAsset with a TArray property ↔ multi-row CSV
+	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
+	static bool ExportDataAssetRowsToCSV(UDataAsset* DataAsset, const FString& FilePath);
+
+	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
+	static bool ImportCSVRowsToDataAsset(const FString& FilePath, UDataAsset* DataAsset, bool bSavePackage);
+
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static TArray<FString> GetExportableDataAssetClasses();
 
 	UFUNCTION(BlueprintCallable, Category = "AssetCsvSync")
 	static TArray<FString> GetExportableProperties(UClass* Class);
 	static bool GetCSVHeaderColumns(const FString& FilePath, TArray<FString>& OutColumns);
+
+	// CSV text utilities (also used by automation tests).
+	static FString EscapeCSVString(const FString& Value);
+	static TArray<FString> ParseCSVLine(const FString& Line);
 
 private:
 	static bool CanExportClass(UClass* Class);
@@ -58,10 +69,11 @@ private:
 	static UClass* GetObjectPropertyClass(FProperty* Property);
 	static bool ApplyColumnsToStruct(void* StructPtr, UScriptStruct* Struct, const TMap<FString, FString>& ColumnToValue, const FString& Prefix, TSet<const UObject*>& Visited);
 
+	// CsvId helper (CsvRows struct row matching).
+	static FString GetCsvIdValueFromStruct(const void* StructPtr, UScriptStruct* Struct);
+
 	static FString PropertyToString(FProperty* Property, const uint8* PropertyData);
 	static bool StringToProperty(FProperty* Property, uint8* PropertyData, const FString& StringValue);
-	static FString EscapeCSVString(const FString& Value);
-	static TArray<FString> ParseCSVLine(const FString& Line);
 	static FString EscapeListItem(const FString& Value);
 	static TArray<FString> ParseListCell(const FString& Cell);
 	static FString JoinListCell(const TArray<FString>& Items);

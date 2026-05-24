@@ -25,6 +25,8 @@
 #include "Widgets/Images/SImage.h"
 
 #include "AssetCsvSyncCSVHandler.h"
+#include "ExportableMetaData.h"
+#include "PropertyCustomizationHelpers.h"
 
 TSharedRef<IDetailCustomization> FAssetCsvSyncCSVExportSettingsCustomization::MakeInstance()
 {
@@ -41,7 +43,31 @@ void FAssetCsvSyncCSVExportSettingsCustomization::CustomizeDetails(IDetailLayout
 	TSharedRef<IPropertyHandle> CSVFileHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAssetCsvSyncCSVExportSettings, CSVFile));
 	TSharedPtr<IPropertyHandle> CSVPathHandle = CSVFileHandle->GetChildHandle(TEXT("FilePath"));
 
-	ExportCategory.AddProperty(DataAssetHandle);
+	// Hide the default DataAsset row and replace it with a filtered picker
+	// that only shows assets whose class has meta=(CsvExport).
+	DetailBuilder.HideProperty(DataAssetHandle);
+	ExportCategory.AddCustomRow(FText::FromString(TEXT("Data Asset")))
+		.NameContent()
+		[
+			SNew(STextBlock)
+				.Text(FText::FromString(TEXT("Data Asset")))
+				.Font(IDetailLayoutBuilder::GetDetailFont())
+		]
+		.ValueContent()
+		.MinDesiredWidth(420.0f)
+		[
+			SNew(SObjectPropertyEntryBox)
+				.PropertyHandle(DataAssetHandle)
+				.AllowedClass(UDataAsset::StaticClass())
+				.OnShouldFilterAsset_Lambda([](const FAssetData& AssetData) -> bool
+				{
+					// Return true to hide assets that don't have CsvExport.
+					UClass* AssetClass = AssetData.GetClass();
+					if (!AssetClass)
+						return true;
+					return !FExportableMetaData::IsExportable(AssetClass);
+				})
+		];
 
 	auto PopulateColumns = [ColumnsHandle, PropUtils](const TArray<FString>& Cols)
 	{
@@ -250,7 +276,10 @@ void FAssetCsvSyncCSVExportSettingsCustomization::CustomizeDetails(IDetailLayout
 					{
 						if (UDataAsset* DA = Cast<UDataAsset>(Obj))
 						{
-							DefaultName = DA->GetName() + TEXT(".csv");
+							// Prefer the CsvExport value (e.g. "weapon_table") as the filename;
+				// fall back to the UObject name if no value was provided.
+				const FString CsvExportName = FExportableMetaData::GetCsvExportName(DA->GetClass());
+				DefaultName = (!CsvExportName.IsEmpty() ? CsvExportName : DA->GetName()) + TEXT(".csv");
 						}
 					}
 				}

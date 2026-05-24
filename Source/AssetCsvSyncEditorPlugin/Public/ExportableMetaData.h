@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
+#include "UObject/PropertyIterator.h"
 
 class ASSETCSVSYNCEDITORPLUGIN_API FExportableMetaData
 {
@@ -66,5 +67,43 @@ public:
 	static bool HasCsvExpand(FProperty* Property)
 	{
 		return Property && Property->HasMetaData(GetCsvExpandMetaDataKey());
+	}
+
+	static bool HasCsvRows(FProperty* Property)
+	{
+		return Property && Property->HasMetaData(TEXT("CsvRows"));
+	}
+
+	static bool HasCsvId(FProperty* Property)
+	{
+		return Property && Property->HasMetaData(TEXT("CsvId"));
+	}
+
+	// Returns the value of CsvExport = "..." on the class, or empty string if the tag
+	// has no value or the class is null.  Used as the default CSV filename suggestion.
+	static FString GetCsvExportName(UClass* Class)
+	{
+		if (!Class) return FString();
+		return Class->GetMetaData(GetExportableMetaDataKey());
+	}
+
+	// Finds the first TArray<FStruct> property tagged CsvRows on the class.
+	// Returns true and fills OutArrayProp / OutStructProp on success.
+	static bool FindCsvRowsProperty(UClass* Class, FArrayProperty*& OutArrayProp, FStructProperty*& OutStructProp)
+	{
+		if (!Class) return false;
+		for (TFieldIterator<FProperty> It(Class); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (!HasCsvRows(Prop)) continue;
+			FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop);
+			if (!ArrayProp) continue;
+			FStructProperty* StructProp = CastField<FStructProperty>(ArrayProp->Inner);
+			if (!StructProp) continue;
+			OutArrayProp  = ArrayProp;
+			OutStructProp = StructProp;
+			return true;
+		}
+		return false;
 	}
 };

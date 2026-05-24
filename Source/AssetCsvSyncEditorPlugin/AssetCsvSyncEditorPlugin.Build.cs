@@ -12,11 +12,11 @@ public class AssetCsvSyncEditorPlugin : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"EditorFramework",
 			"DeveloperSettings",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
+			"EditorFramework",
 			"PropertyEditor",
 			"UnrealEd",
 			"AssetRegistry",
@@ -27,5 +27,6 @@ public class AssetCsvSyncEditorPlugin : ModuleRules
 			"LevelEditor",
 			"DesktopPlatform",
 		});
+
 	}
 }

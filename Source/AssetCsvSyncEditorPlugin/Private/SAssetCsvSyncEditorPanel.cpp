@@ -4,6 +4,7 @@
 
 #include "AssetCsvSyncCSVHandler.h"
 #include "AssetCsvSyncEditorPanelSettings.h"
+#include "ExportableMetaData.h"
 
 #include "Framework/Notifications/NotificationManager.h"
 #include "Modules/ModuleManager.h"
@@ -17,6 +18,15 @@
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/Text/STextBlock.h"
+
+// Returns true if the asset's class has a CsvRows TArray property (multi-row mode).
+static bool HasCsvRowsAsset(UDataAsset* Asset)
+{
+	if (!Asset) return false;
+	FArrayProperty* Arr = nullptr;
+	FStructProperty* Str = nullptr;
+	return FExportableMetaData::FindCsvRowsProperty(Asset->GetClass(), Arr, Str);
+}
 
 void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 {
@@ -80,7 +90,12 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 					.Text(FText::FromString(TEXT("Export to CSV")))
 					.IsEnabled_Lambda([this]()
 					{
-						return ExportSettings.IsValid() && ExportSettings->DataAsset != nullptr && !ExportSettings->CSVFile.FilePath.IsEmpty() && ExportSettings->ExportColumns.Num() > 0;
+						if (!ExportSettings.IsValid() || !ExportSettings->DataAsset || ExportSettings->CSVFile.FilePath.IsEmpty())
+							return false;
+						// CsvRows assets export all rows — no column list required.
+						if (HasCsvRowsAsset(ExportSettings->DataAsset))
+							return true;
+						return ExportSettings->ExportColumns.Num() > 0;
 					})
 					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnExportClicked)
 				]
@@ -111,7 +126,12 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 					.Text(FText::FromString(TEXT("Import CSV")))
 					.IsEnabled_Lambda([this]()
 					{
-						return ImportSettings.IsValid() && ImportSettings->DataAsset != nullptr && !ImportSettings->CSVFile.FilePath.IsEmpty() && ImportSettings->ImportColumns.Num() > 0;
+						if (!ImportSettings.IsValid() || !ImportSettings->DataAsset || ImportSettings->CSVFile.FilePath.IsEmpty())
+							return false;
+						// CsvRows assets import all rows — no column list required.
+						if (HasCsvRowsAsset(ImportSettings->DataAsset))
+							return true;
+						return ImportSettings->ImportColumns.Num() > 0;
 					})
 					.OnClicked(this, &SAssetCsvSyncEditorPanel::OnImportClicked)
 				]
@@ -119,6 +139,7 @@ void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
 		]
 	];
 }
+
 FReply SAssetCsvSyncEditorPanel::OnExportClicked()
 {
 	if (!ExportSettings.IsValid() || !ExportSettings->DataAsset)
@@ -132,10 +153,22 @@ FReply SAssetCsvSyncEditorPanel::OnExportClicked()
 		return FReply::Handled();
 	}
 
-	const bool bOk = UAssetCsvSyncCSVHandler::ExportDataAssetToCSV_Columns(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath, ExportSettings->ExportColumns);
+	bool bOk = false;
+	if (HasCsvRowsAsset(ExportSettings->DataAsset))
+	{
+		// Multi-row mode: export all rows from the CsvRows TArray.
+		bOk = UAssetCsvSyncCSVHandler::ExportDataAssetRowsToCSV(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath);
+	}
+	else
+	{
+		// Single-asset mode: export selected columns only.
+		bOk = UAssetCsvSyncCSVHandler::ExportDataAssetToCSV_Columns(ExportSettings->DataAsset, ExportSettings->CSVFile.FilePath, ExportSettings->ExportColumns);
+	}
+
 	Notify(bOk ? FText::FromString(TEXT("Export complete.")) : FText::FromString(TEXT("Export failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
+
 FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 {
 	if (!ImportSettings.IsValid())
@@ -157,10 +190,23 @@ FReply SAssetCsvSyncEditorPanel::OnImportClicked()
 		return FReply::Handled();
 	}
 
-	const bool bOk = UAssetCsvSyncCSVHandler::ImportCSVToDataAssetInPlace(SourcePath, ImportSettings->DataAsset, ImportSettings->ImportColumns, ImportSettings->bSavePackage);
+	bool bOk = false;
+	if (HasCsvRowsAsset(ImportSettings->DataAsset))
+	{
+		// Multi-row mode: import all rows from CSV into the CsvRows TArray.
+		// Rows are matched by CsvId if present; otherwise the array is replaced wholesale.
+		bOk = UAssetCsvSyncCSVHandler::ImportCSVRowsToDataAsset(SourcePath, ImportSettings->DataAsset, ImportSettings->bSavePackage);
+	}
+	else
+	{
+		// Single-asset mode: import selected columns only.
+		bOk = UAssetCsvSyncCSVHandler::ImportCSVToDataAssetInPlace(SourcePath, ImportSettings->DataAsset, ImportSettings->ImportColumns, ImportSettings->bSavePackage);
+	}
+
 	Notify(bOk ? FText::FromString(TEXT("Import complete.")) : FText::FromString(TEXT("Import failed. Check Output Log.")), bOk);
 	return FReply::Handled();
 }
+
 void SAssetCsvSyncEditorPanel::Notify(const FText& Message, bool bSuccess) const
 {
 	FNotificationInfo Info(Message);

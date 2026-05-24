@@ -588,7 +588,21 @@ TArray<FString> UAssetCsvSyncCSVHandler::GetExportableProperties(UClass* Class)
 {
 	TMap<FString, FString> ColumnToValue;
 	TArray<FString> ColumnOrder;
-	ExportClassColumnsEmpty(Class, ColumnToValue, ColumnOrder, FString());
+
+	// For CsvRows assets the exportable columns live inside the row struct,
+	// not directly on the class. Drill into the struct so the panel can show
+	// (and the Reset button can restore) the correct column list.
+	FArrayProperty* ArrayProp = nullptr;
+	FStructProperty* StructProp = nullptr;
+	if (FExportableMetaData::FindCsvRowsProperty(Class, ArrayProp, StructProp))
+	{
+		ExportStructColumnsEmpty(StructProp->Struct, ColumnToValue, ColumnOrder, FString());
+	}
+	else
+	{
+		ExportClassColumnsEmpty(Class, ColumnToValue, ColumnOrder, FString());
+	}
+
 	return ColumnOrder;
 }
 
@@ -2081,6 +2095,206 @@ bool UAssetCsvSyncCSVHandler::StringToProperty(FProperty* Property, uint8* Prope
 	return Result != nullptr;
 }
 
+// ===========================================================================
+// CsvRows: one DataAsset with a TArray property ↔ multi-row CSV
+// ===========================================================================
+
+bool UAssetCsvSyncCSVHandler::ExportDataAssetRowsToCSV(UDataAsset* DataAsset, const FString& FilePath)
+{
+	if (!DataAsset)
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ExportDataAssetRowsToCSV: DataAsset is null"));
+		return false;
+	}
+
+	FArrayProperty* RowsArrayProp = nullptr;
+	FStructProperty* RowStructProp = nullptr;
+	if (!FExportableMetaData::FindCsvRowsProperty(DataAsset->GetClass(), RowsArrayProp, RowStructProp))
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ExportDataAssetRowsToCSV: No CsvRows property found on %s"), *DataAsset->GetClass()->GetName());
+		return false;
+	}
+
+	const void* ArrayPtr = RowsArrayProp->ContainerPtrToValuePtr<void>(DataAsset);
+	FScriptArrayHelper Helper(RowsArrayProp, ArrayPtr);
+
+	// Seed column order with static columns from the struct schema.
+	// ExportStructColumnsEmpty skips TArray/TMap under CsvExpand because element
+	// count is not known without data — those are discovered in the pass below.
+	TMap<FString, FString> KnownColumns;
+	TArray<FString> ColumnOrder;
+	ExportStructColumnsEmpty(RowStructProp->Struct, KnownColumns, ColumnOrder, FString());
+
+	// Export all rows into an intermediate buffer, extending ColumnOrder with any
+	// runtime-discovered columns (e.g. Tags_0, Damage_Fire from CsvExpand arrays/maps).
+	TArray<TMap<FString, FString>> RowsData;
+	RowsData.Reserve(Helper.Num());
+
+	TSet<const UObject*> Visited;
+	for (int32 i = 0; i < Helper.Num(); ++i)
+	{
+		const void* ElemPtr = Helper.GetRawPtr(i);
+		TMap<FString, FString> ColumnToValue;
+		TArray<FString> RowOrder;
+		Visited.Reset();
+		ExportStructToColumns(ElemPtr, RowStructProp->Struct, ColumnToValue, RowOrder, FString(), Visited);
+
+		for (const FString& Col : RowOrder)
+		{
+			if (!KnownColumns.Contains(Col))
+			{
+				ColumnOrder.Add(Col);
+				KnownColumns.Add(Col, FString());
+			}
+		}
+		RowsData.Add(MoveTemp(ColumnToValue));
+	}
+
+	if (ColumnOrder.IsEmpty())
+	{
+		UE_LOG(LogAssetCsvSync, Warning, TEXT("ExportDataAssetRowsToCSV: No exportable columns found in struct %s"), *RowStructProp->Struct->GetName());
+		return false;
+	}
+
+	FString CSVContent;
+
+	// Header
+	for (const FString& Col : ColumnOrder)
+		CSVContent += EscapeCSVString(Col) + TEXT(",");
+	CSVContent.RemoveFromEnd(TEXT(","));
+	CSVContent += TEXT("\n");
+
+	// Rows
+	for (const TMap<FString, FString>& ColumnToValue : RowsData)
+	{
+		for (const FString& Col : ColumnOrder)
+		{
+			const FString* Val = ColumnToValue.Find(Col);
+			CSVContent += EscapeCSVString(Val ? *Val : FString()) + TEXT(",");
+		}
+		CSVContent.RemoveFromEnd(TEXT(","));
+		CSVContent += TEXT("\n");
+	}
+
+	return FFileHelper::SaveStringToFile(CSVContent, *FilePath);
+}
+
+bool UAssetCsvSyncCSVHandler::ImportCSVRowsToDataAsset(const FString& FilePath, UDataAsset* DataAsset, bool bSavePackage)
+{
+	if (!DataAsset)
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVRowsToDataAsset: DataAsset is null"));
+		return false;
+	}
+
+	FArrayProperty* RowsArrayProp = nullptr;
+	FStructProperty* RowStructProp = nullptr;
+	if (!FExportableMetaData::FindCsvRowsProperty(DataAsset->GetClass(), RowsArrayProp, RowStructProp))
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVRowsToDataAsset: No CsvRows property found on %s"), *DataAsset->GetClass()->GetName());
+		return false;
+	}
+
+	FString CSVContent;
+	if (!FFileHelper::LoadFileToString(CSVContent, *FilePath))
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVRowsToDataAsset: Could not load file %s"), *FilePath);
+		return false;
+	}
+
+	TArray<FString> Lines;
+	CSVContent.ParseIntoArrayLines(Lines, false);
+	if (Lines.Num() < 2)
+	{
+		UE_LOG(LogAssetCsvSync, Error, TEXT("ImportCSVRowsToDataAsset: CSV has no data rows"));
+		return false;
+	}
+
+	TArray<FString> Headers = ParseCSVLine(Lines[0]);
+
+	// Find CsvId column index in the header.
+	int32 IdColIndex = INDEX_NONE;
+	for (TFieldIterator<FProperty> It(RowStructProp->Struct, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		if (!FExportableMetaData::HasCsvId(*It)) continue;
+		const FString ColName = FExportableMetaData::HasCsvColumn(*It)
+			? FExportableMetaData::GetCsvColumn(*It)
+			: (*It)->GetName();
+		IdColIndex = Headers.IndexOfByKey(ColName);
+		break;
+	}
+
+	{
+		FScopedTransaction Transaction(FText::FromString(TEXT("Import CSV Rows to Data Asset")));
+		DataAsset->Modify();
+
+		void* ArrayPtr = RowsArrayProp->ContainerPtrToValuePtr<void>(DataAsset);
+		FScriptArrayHelper Helper(RowsArrayProp, ArrayPtr);
+
+		for (int32 RowIdx = 1; RowIdx < Lines.Num(); ++RowIdx)
+		{
+			const FString& Line = Lines[RowIdx];
+			if (Line.TrimStartAndEnd().IsEmpty())
+				continue;
+
+			TArray<FString> Values = ParseCSVLine(Line);
+			while (Values.Num() < Headers.Num())
+				Values.Add(FString());
+
+			TMap<FString, FString> ColumnToValue;
+			for (int32 i = 0; i < Headers.Num(); ++i)
+				ColumnToValue.Add(Headers[i], Values[i]);
+
+			// Match row by CsvId, or append a new element.
+			int32 TargetIndex = INDEX_NONE;
+			if (IdColIndex != INDEX_NONE && IdColIndex < Values.Num())
+			{
+				const FString& IdValue = Values[IdColIndex];
+				for (int32 i = 0; i < Helper.Num(); ++i)
+				{
+					if (GetCsvIdValueFromStruct(Helper.GetRawPtr(i), RowStructProp->Struct) == IdValue)
+					{
+						TargetIndex = i;
+						break;
+					}
+				}
+			}
+
+			if (TargetIndex == INDEX_NONE)
+				TargetIndex = Helper.AddValue();
+
+			TSet<const UObject*> Visited;
+			ApplyColumnsToStruct(Helper.GetRawPtr(TargetIndex), RowStructProp->Struct, ColumnToValue, FString(), Visited);
+		}
+
+		DataAsset->MarkPackageDirty();
+		FPropertyChangedEvent PropChangedEvent(RowsArrayProp, EPropertyChangeType::Unspecified);
+		DataAsset->PostEditChangeProperty(PropChangedEvent);
+	}
+
+	if (bSavePackage)
+		SaveCreatedAsset(DataAsset->GetPackage(), DataAsset);
+
+	return true;
+}
+
+// CsvId helper (CsvRows struct row matching).
+FString UAssetCsvSyncCSVHandler::GetCsvIdValueFromStruct(const void* StructPtr, UScriptStruct* Struct)
+{
+	if (!StructPtr || !Struct)
+		return FString();
+	for (TFieldIterator<FProperty> It(Struct, EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		FProperty* Prop = *It;
+		if (!FExportableMetaData::HasCsvId(Prop)) continue;
+		const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(StructPtr);
+		FString Result;
+		Prop->ExportTextItem_Direct(Result, ValuePtr, nullptr, nullptr, PPF_ExternalEditor);
+		return Result;
+	}
+	return FString();
+}
+
 FString UAssetCsvSyncCSVHandler::EscapeCSVString(const FString& Value)
 {
 	if (Value.Contains(TEXT(",")) || Value.Contains(TEXT("\"")) || Value.Contains(TEXT("\n")) || Value.Contains(TEXT("\r")))
@@ -2094,12 +2308,22 @@ FString UAssetCsvSyncCSVHandler::EscapeCSVString(const FString& Value)
 TArray<FString> UAssetCsvSyncCSVHandler::ParseCSVLine(const FString& Line)
 {
 	TArray<FString> Result;
-	FString CurrentValue;
+	FString CurrentCell;
 	bool bInQuotes = false;
+	bool bCellWasQuoted = false;
+
+	auto FlushCell = [&]()
+	{
+		if (!bCellWasQuoted)
+			CurrentCell.TrimStartAndEndInline();
+		Result.Add(MoveTemp(CurrentCell));
+		CurrentCell.Reset();
+		bCellWasQuoted = false;
+	};
 
 	for (int32 i = 0; i < Line.Len(); ++i)
 	{
-		TCHAR Char = Line[i];
+		const TCHAR Char = Line[i];
 
 		if (bInQuotes)
 		{
@@ -2107,7 +2331,7 @@ TArray<FString> UAssetCsvSyncCSVHandler::ParseCSVLine(const FString& Line)
 			{
 				if (i + 1 < Line.Len() && Line[i + 1] == TEXT('"'))
 				{
-					CurrentValue += TEXT('"');
+					CurrentCell += TEXT('"');
 					++i;
 				}
 				else
@@ -2117,7 +2341,7 @@ TArray<FString> UAssetCsvSyncCSVHandler::ParseCSVLine(const FString& Line)
 			}
 			else
 			{
-				CurrentValue += Char;
+				CurrentCell += Char;
 			}
 		}
 		else
@@ -2125,20 +2349,20 @@ TArray<FString> UAssetCsvSyncCSVHandler::ParseCSVLine(const FString& Line)
 			if (Char == TEXT('"'))
 			{
 				bInQuotes = true;
+				bCellWasQuoted = true;
 			}
 			else if (Char == TEXT(','))
 			{
-				Result.Add(CurrentValue);
-				CurrentValue.Reset();
+				FlushCell();
 			}
 			else
 			{
-				CurrentValue += Char;
+				CurrentCell += Char;
 			}
 		}
 	}
 
-	Result.Add(CurrentValue);
+	FlushCell();
 	return Result;
 }
 
