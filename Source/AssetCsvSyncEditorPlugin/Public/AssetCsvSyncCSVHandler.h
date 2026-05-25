@@ -69,8 +69,9 @@ private:
 	static UClass* GetObjectPropertyClass(FProperty* Property);
 	static bool ApplyColumnsToStruct(void* StructPtr, UScriptStruct* Struct, const TMap<FString, FString>& ColumnToValue, const FString& Prefix, TSet<const UObject*>& Visited);
 
-	// CsvId helper (CsvRows struct row matching).
+	// CsvId helpers for row matching.
 	static FString GetCsvIdValueFromStruct(const void* StructPtr, UScriptStruct* Struct);
+	static FString GetCsvIdValueFromObject(UObject* Object);
 
 	static FString PropertyToString(FProperty* Property, const uint8* PropertyData);
 	static bool StringToProperty(FProperty* Property, uint8* PropertyData, const FString& StringValue);

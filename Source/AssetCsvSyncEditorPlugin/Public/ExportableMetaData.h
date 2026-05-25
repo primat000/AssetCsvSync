@@ -106,4 +106,33 @@ public:
 		}
 		return false;
 	}
+
+	// Finds the first TArray<UObject*> or TArray<TSoftObjectPtr<T>> property tagged CsvRows.
+	// Returns true and fills OutArrayProp / OutElementClass on success.
+	// Struct arrays (handled by FindCsvRowsProperty) are intentionally skipped.
+	static bool FindCsvRowsObjectProperty(UClass* Class, FArrayProperty*& OutArrayProp, UClass*& OutElementClass)
+	{
+		if (!Class) return false;
+		for (TFieldIterator<FProperty> It(Class); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (!HasCsvRows(Prop)) continue;
+			FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop);
+			if (!ArrayProp) continue;
+			if (CastField<FStructProperty>(ArrayProp->Inner)) continue; // struct — handled elsewhere
+			if (FObjectProperty* ObjProp = CastField<FObjectProperty>(ArrayProp->Inner))
+			{
+				OutArrayProp   = ArrayProp;
+				OutElementClass = ObjProp->PropertyClass;
+				return true;
+			}
+			if (FSoftObjectProperty* SoftProp = CastField<FSoftObjectProperty>(ArrayProp->Inner))
+			{
+				OutArrayProp   = ArrayProp;
+				OutElementClass = SoftProp->PropertyClass;
+				return true;
+			}
+		}
+		return false;
+	}
 };

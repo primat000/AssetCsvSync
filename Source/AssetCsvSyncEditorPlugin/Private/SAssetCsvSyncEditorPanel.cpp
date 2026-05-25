@@ -20,12 +20,16 @@
 #include "Widgets/Text/STextBlock.h"
 
 // Returns true if the asset's class has a CsvRows TArray property (multi-row mode).
+// Handles both TArray<FStruct> and TArray<UObject*> / TArray<TSoftObjectPtr<T>>.
 static bool HasCsvRowsAsset(UDataAsset* Asset)
 {
 	if (!Asset) return false;
 	FArrayProperty* Arr = nullptr;
 	FStructProperty* Str = nullptr;
-	return FExportableMetaData::FindCsvRowsProperty(Asset->GetClass(), Arr, Str);
+	if (FExportableMetaData::FindCsvRowsProperty(Asset->GetClass(), Arr, Str))
+		return true;
+	UClass* ObjClass = nullptr;
+	return FExportableMetaData::FindCsvRowsObjectProperty(Asset->GetClass(), Arr, ObjClass);
 }
 
 void SAssetCsvSyncEditorPanel::Construct(const FArguments& InArgs)
