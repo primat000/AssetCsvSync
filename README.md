@@ -130,10 +130,10 @@ Column names are `PropertyName_FieldName` where `FieldName` is the C++ property 
 
 ### Pointer to another asset
 
-`CsvExpand` works with both `TSoftObjectPtr<T>` and `TObjectPtr<T>` / `UObject*`. The referenced asset class must also have `CsvExport`. Its properties are expanded as columns prefixed with the pointer property name.
+`CsvExpand` works with both `TSoftObjectPtr<T>` and `TObjectPtr<T>` / `UObject*`. The referenced class does not need `CsvExport` — only the properties you want in the CSV need `CsvColumn` or `CsvExpand`. Columns are prefixed with the pointer property name.
 
 ```cpp
-UCLASS(meta = (CsvExport = "weapon_table"))
+UCLASS()
 class UItemData : public UDataAsset
 {
     GENERATED_BODY()

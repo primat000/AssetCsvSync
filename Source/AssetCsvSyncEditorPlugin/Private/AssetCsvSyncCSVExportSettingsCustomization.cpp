@@ -42,6 +42,7 @@ void FAssetCsvSyncCSVExportSettingsCustomization::CustomizeDetails(IDetailLayout
 	TSharedRef<IPropertyHandle> ColumnsHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAssetCsvSyncCSVExportSettings, ExportColumns));
 	TSharedRef<IPropertyHandle> CSVFileHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAssetCsvSyncCSVExportSettings, CSVFile));
 	TSharedPtr<IPropertyHandle> CSVPathHandle = CSVFileHandle->GetChildHandle(TEXT("FilePath"));
+	TSharedPtr<FAssetThumbnailPool> ThumbnailPool = DetailBuilder.GetThumbnailPool();
 
 	// Hide the default DataAsset row and replace it with a filtered picker
 	// that only shows assets whose class has meta=(CsvExport).
@@ -59,6 +60,7 @@ void FAssetCsvSyncCSVExportSettingsCustomization::CustomizeDetails(IDetailLayout
 			SNew(SObjectPropertyEntryBox)
 				.PropertyHandle(DataAssetHandle)
 				.AllowedClass(UDataAsset::StaticClass())
+				.ThumbnailPool(ThumbnailPool)
 				.OnShouldFilterAsset_Lambda([](const FAssetData& AssetData) -> bool
 				{
 					// Return true to hide assets that don't have CsvExport.

@@ -43,6 +43,7 @@ void FAssetCsvSyncCSVImportSettingsCustomization::CustomizeDetails(IDetailLayout
 	TSharedRef<IPropertyHandle> ColumnsHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAssetCsvSyncCSVImportSettings, ImportColumns));
 	TSharedPtr<IPropertyHandle> CSVPathHandle = CSVFileHandle->GetChildHandle(TEXT("FilePath"));
 	TSharedRef<IPropertyHandle> SaveHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UAssetCsvSyncCSVImportSettings, bSavePackage));
+	TSharedPtr<FAssetThumbnailPool> ThumbnailPool = DetailBuilder.GetThumbnailPool();
 
 	auto PopulateColumns = [ColumnsHandle, PropUtils](const TArray<FString>& Cols)
 	{
@@ -282,6 +283,7 @@ void FAssetCsvSyncCSVImportSettingsCustomization::CustomizeDetails(IDetailLayout
 			SNew(SObjectPropertyEntryBox)
 				.PropertyHandle(DataAssetHandle)
 				.AllowedClass(UDataAsset::StaticClass())
+				.ThumbnailPool(ThumbnailPool)
 				.OnShouldFilterAsset_Lambda([](const FAssetData& AssetData) -> bool
 				{
 					// Return true to hide assets that don't have CsvExport.

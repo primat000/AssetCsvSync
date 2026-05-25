@@ -660,7 +660,7 @@ void UAssetCsvSyncCSVHandler::ExportClassColumnsEmpty(UClass* Class, TMap<FStrin
 			}
 
 			UClass* InnerClass = GetObjectPropertyClass(Property);
-			if (!InnerClass || !CanExportClass(InnerClass))
+			if (!InnerClass)
 				continue;
 
 			const FString ExpandPrefix = Property->GetName() + TEXT("_");
@@ -760,8 +760,6 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 						UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
 						if (!ElemObj)
 							continue;
-						if (!CanExportClass(ElemObj->GetClass()))
-							continue;
 						const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
 						ExportObjectToColumns(ElemObj, ElemObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
 					}
@@ -806,8 +804,6 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 						UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
 						if (!ValObj)
 							continue;
-						if (!CanExportClass(ValObj->GetClass()))
-							continue;
 						const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
 						ExportObjectToColumns(ValObj, ValObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
 					}
@@ -828,7 +824,7 @@ void UAssetCsvSyncCSVHandler::ExportObjectToColumns(UObject* ObjectOrNull, UClas
 			}
 
 			UClass* InnerClass = GetObjectPropertyClass(Property);
-			if (!InnerClass || !CanExportClass(InnerClass))
+			if (!InnerClass)
 				continue;
 
 			UObject* InnerObject = ObjectOrNull ? ResolveObjectPropertyValue(ObjectOrNull, Property, true) : nullptr;
@@ -971,8 +967,6 @@ void UAssetCsvSyncCSVHandler::ExportStructToColumns(const void* StructPtr, UScri
 					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
 					if (!ElemObj)
 						continue;
-					if (!CanExportClass(ElemObj->GetClass()))
-						continue;
 					const FString ElemPrefix = Prefix + ExpandPrefix + FString::FromInt(Index) + TEXT("_");
 					ExportObjectToColumns(ElemObj, ElemObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
 				}
@@ -1016,8 +1010,6 @@ void UAssetCsvSyncCSVHandler::ExportStructToColumns(const void* StructPtr, UScri
 					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
 					if (!ValObj)
 						continue;
-					if (!CanExportClass(ValObj->GetClass()))
-						continue;
 					const FString ElemPrefix = Prefix + ExpandPrefix + KeyString + TEXT("_");
 					ExportObjectToColumns(ValObj, ValObj->GetClass(), InOutColumnToValue, InOutColumnOrder, ElemPrefix, Visited);
 				}
@@ -1039,8 +1031,6 @@ void UAssetCsvSyncCSVHandler::ExportStructToColumns(const void* StructPtr, UScri
 
 		UObject* InnerObject = ResolveObjectPropertyValueFromContainerPtr(StructPtr, Property, true);
 		if (!InnerObject)
-			continue;
-		if (!CanExportClass(InnerObject->GetClass()))
 			continue;
 		ExportObjectToColumns(InnerObject, InnerObject->GetClass(), InOutColumnToValue, InOutColumnOrder, Prefix + ExpandPrefix, Visited);
 	}
@@ -1169,8 +1159,6 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToStruct(void* StructPtr, UScriptStruc
 					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
 					if (!ElemObj)
 						continue;
-					if (!CanExportClass(ElemObj->GetClass()))
-						continue;
 					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
 					ApplyColumnsToObject(ElemObj, ElemObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
 				}
@@ -1288,8 +1276,6 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToStruct(void* StructPtr, UScriptStruc
 					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
 					if (!ValObj)
 						continue;
-					if (!CanExportClass(ValObj->GetClass()))
-						continue;
 					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
 					ApplyColumnsToObject(ValObj, ValObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
 				}
@@ -1344,8 +1330,6 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToStruct(void* StructPtr, UScriptStruc
 		UObject* InnerObject = ResolveObjectPropertyValueFromContainerPtr(StructPtr, Property, true);
 		if (!InnerObject)
 			continue;
-		if (!CanExportClass(InnerObject->GetClass()))
-			continue;
 		ApplyColumnsToObject(InnerObject, InnerObject->GetClass(), ColumnToValue, FullExpandPrefix, Visited);
 	}
 
@@ -1384,6 +1368,15 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 	if (Visited.Contains(TargetObject))
 		return true;
 	Visited.Add(TargetObject);
+
+	// When writing into an external asset via a CsvExpand pointer (non-empty Prefix),
+	// register the change with the transaction system and mark the package dirty so that
+	// the editor Details panel refreshes and the asset is queued for save.
+	const bool bIsExternalAsset = !Prefix.IsEmpty() && TargetObject->IsAsset();
+	if (bIsExternalAsset)
+	{
+		TargetObject->Modify();
+	}
 
 	const EAssetCsvSyncWriteBackScope Scope = UAssetCsvSyncEditorPluginSettings::Get()->WriteBackScope;
 
@@ -1502,8 +1495,6 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 					void* ElemPtr = Helper.GetRawPtr(Index);
 					UObject* ElemObj = ResolveObjectPropertyValueFromContainerPtr(ElemPtr, ArrayProp->Inner, true);
 					if (!ElemObj)
-						continue;
-					if (!CanExportClass(ElemObj->GetClass()))
 						continue;
 					const FString ElemPrefix = FullExpandPrefix + FString::FromInt(Index) + TEXT("_");
 					ApplyColumnsToObject(ElemObj, ElemObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
@@ -1642,8 +1633,6 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 					UObject* ValObj = ResolveObjectPropertyValueFromContainerPtr(ValuePtr, MapProp->ValueProp, true);
 					if (!ValObj)
 						continue;
-					if (!CanExportClass(ValObj->GetClass()))
-						continue;
 					const FString ElemPrefix = FullExpandPrefix + KeyString + TEXT("_");
 					ApplyColumnsToObject(ValObj, ValObj->GetClass(), ColumnToValue, ElemPrefix, Visited);
 				}
@@ -1697,14 +1686,18 @@ bool UAssetCsvSyncCSVHandler::ApplyColumnsToObject(UObject* TargetObject, UClass
 		UObject* InnerObject = ResolveObjectPropertyValue(TargetObject, Property, true);
 		if (!InnerObject)
 			continue;
-		if (!CanExportClass(InnerObject->GetClass()))
-			continue;
 		ApplyColumnsToObject(InnerObject, InnerObject->GetClass(), ColumnToValue, FullExpandPrefix, Visited);
 	}
 
 	if (UClass* SuperClass = TargetClass->GetSuperClass())
 	{
 		ApplyColumnsToObject(TargetObject, SuperClass, ColumnToValue, Prefix, Visited);
+	}
+
+	if (bIsExternalAsset)
+	{
+		TargetObject->MarkPackageDirty();
+		TargetObject->PostEditChange();
 	}
 
 	return true;
@@ -1904,7 +1897,7 @@ void UAssetCsvSyncCSVHandler::ExportStructColumnsEmpty(UScriptStruct* Struct, TM
 		}
 
 		UClass* InnerClass = GetObjectPropertyClass(Property);
-		if (InnerClass && CanExportClass(InnerClass))
+		if (InnerClass)
 		{
 			ExportClassColumnsEmpty(InnerClass, InOutColumnToValue, InOutColumnOrder, Prefix + Property->GetName() + TEXT("_"));
 		}
